@@ -3,7 +3,6 @@ import numpy as np
 from typing import List, Tuple, Optional
 from dataclasses import dataclass
 
-
 @dataclass
 class LineSegment:
     p1: Tuple[float, float]
@@ -17,7 +16,6 @@ class LineSegment:
     @property
     def angle(self) -> float:
         return np.arctan2(self.p2[1] - self.p1[1], self.p2[0] - self.p1[0])
-
 
 @dataclass
 class LPattern:
@@ -35,9 +33,7 @@ class LPattern:
         y_min, y_max = int(min(ys)), int(max(ys))
         return x_min, y_min, x_max - x_min, y_max - y_min
 
-
 class LFinderDetector:
-
     def __init__(self,
                  neighborhood_radius: float = 10.0,
                  min_angle: float = 60.0,
@@ -55,7 +51,11 @@ class LFinderDetector:
         if len(region.shape) == 3:
             region = cv.cvtColor(region, cv.COLOR_BGR2GRAY)
 
-        lines, _, _, _ = self.lsd.detect(region)
+        clahe = cv.createCLAHE(clipLimit=2.0, tileGridSize=(4, 4))
+        enhanced = clahe.apply(region)
+        blurred = cv.GaussianBlur(enhanced, (5, 5), 0)
+
+        lines, _, _, _ = self.lsd.detect(blurred)
 
         segments = []
         if lines is not None:
@@ -109,11 +109,8 @@ class LFinderDetector:
     def _calculate_score(self, angle: float, length_ratio: float, connection_dist: float) -> float:
         angle_deg = np.degrees(angle)
         angle_score = 1.0 - abs(angle_deg - 90.0) / 30.0
-        
         ratio_score = 1.0 - (length_ratio - 1.0) / 4.0
-        
         dist_score = 1.0 - connection_dist / self.neighborhood_radius
-        
         return max(0, angle_score * 0.4 + ratio_score * 0.3 + dist_score * 0.3)
 
     def find_l_patterns(self, segments: List[LineSegment]) -> List[LPattern]:

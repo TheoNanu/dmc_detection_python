@@ -5,7 +5,6 @@ from dataclasses import dataclass
 
 from .l_finder_detector import LPattern
 
-
 @dataclass
 class DataMatrixLocation:
     l_pattern: LPattern
@@ -13,14 +12,13 @@ class DataMatrixLocation:
     right_border: Tuple[int, int, int, int]
     bounding_box: Tuple[int, int, int, int]
 
-
 class DashedBorderDetector:
 
     def __init__(self, tau: int = 5, edge_threshold: int = 50):
         self.tau = tau
         self.edge_threshold = edge_threshold
 
-    def get_detection_regions(self, l_pattern: LPattern, 
+    def get_detection_regions(self, l_pattern: LPattern,
                               img_shape: Tuple[int, int]) -> Tuple[Tuple[int, int, int, int], Tuple[int, int, int, int]]:
         x1, y1 = l_pattern.vertex1
         x3, y3 = l_pattern.vertex2
@@ -69,8 +67,17 @@ class DashedBorderDetector:
 
         return dashed_idx, solid_idx
 
+    @staticmethod
+    def _auto_canny(image: np.ndarray, sigma: float = 0.33) -> np.ndarray:
+        v = np.median(image)
+        lower = max(0, int((1.0 - sigma) * v))
+        upper = min(255, int((1.0 + sigma) * v))
+        if lower < 50: lower = 50
+        if upper < 100: upper = 100
+        return cv.Canny(image, lower, upper)
+
     def detect(self, gray_img: np.ndarray, l_pattern: LPattern) -> Optional[DataMatrixLocation]:
-        edges = cv.Canny(gray_img, self.edge_threshold, self.edge_threshold * 2)
+        edges = self._auto_canny(gray_img)
 
         upper_region, right_region = self.get_detection_regions(l_pattern, gray_img.shape)
 
@@ -84,10 +91,10 @@ class DashedBorderDetector:
         upper_border_y = upper_region[1] + upper_dashed_row
         right_border_x = right_region[0] + right_dashed_col
 
-        min_x = int(min(x1, x2, x3))
-        min_y = int(min(upper_border_y, y1, y2, y3))
-        max_x = int(max(right_border_x, x1, x2, x3))
-        max_y = int(max(y1, y2, y3))
+        min_x = min(int(x1), int(x2), int(x3))
+        min_y = min(int(upper_border_y), int(y1), int(y2), int(y3))
+        max_x = max(int(right_border_x), int(x1), int(x2), int(x3))
+        max_y = max(int(y1), int(y2), int(y3))
 
         bounding_box = (min_x, min_y, max_x - min_x, max_y - min_y)
 
