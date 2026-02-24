@@ -17,7 +17,7 @@ class DetectionResult:
     is_valid: bool
     score: float
 
-    def get_rectified_image(self, full_frame: np.ndarray, output_size: int = 200) -> Optional[np.ndarray]:
+    def get_rectified_image(self, full_frame: np.ndarray, output_size: int = 400) -> Optional[np.ndarray]:
         if not self.precise_location or not self.l_patterns:
             return None
 

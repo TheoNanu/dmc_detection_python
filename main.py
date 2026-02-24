@@ -1,70 +1,58 @@
 import cv2 as cv
-from dm_detector import DataMatrixPipeline
+from dm_detector.pipeline import DataMatrixPipeline
+from dm_decoder.grid_estimation.estimator import GridEstimator
 
 def main():
-    # RUN ON IMAGE
-    frame = cv.imread("./test_images/dmc_on_object_test_image.png")
+    image_path = "./test_images/dmc_sample2.jpeg"
+    frame = cv.imread(image_path)
 
-    cv.imshow("image", frame)
+    if frame is None:
+        print(f"error: could not load image from {image_path}")
+        return
+
+    detector = DataMatrixPipeline()
+    results = detector.process_frame(frame)
+
+    output_frame = detector.draw_results(frame, results)
+    cv.imshow("1. detection", output_frame)
+
+    if results and results[0].is_valid:
+        warped_bgr = results[0].get_rectified_image(frame, output_size=400)
+
+        if warped_bgr is not None:
+            cv.imshow("2. rectified image (warped)", warped_bgr)
+
+            warp_gray = cv.cvtColor(warped_bgr, cv.COLOR_BGR2GRAY)
+
+            print("\ngrid estimator test:\n")
+            estimator = GridEstimator()
+
+            pitch, score = estimator.estimate_pitch(warp_gray)
+
+            if pitch is not None:
+                print(f"estimated module size (pitch): {pitch:.2f} px")
+                print(f"alternation validation score: {score:.2f}")
+
+                margin = estimator.margin
+                h, w = warp_gray.shape
+                w_eff = w - 2 * margin
+                h_eff = h - 2 * margin
+
+                nx = int(round(w_eff / pitch))
+                ny = int(round(h_eff / pitch))
+
+                print(f"estimated matrix size: {nx} cols x {ny} rows")
+
+                if score > 0.8:
+                    print("good score")
+                elif score < 0.6:
+                    print("poor score")
+            else:
+                print("could not estimate pitch")
+
     cv.waitKey(0)
-
-    pipeline = DataMatrixPipeline()
-
-    print("Press 'q' to exit, 'd' to toggle debug view")
-    debug_view = True
-
-    results = pipeline.process_frame(frame)
-    output = pipeline.draw_results(frame, results, debug_view)
-
-    print(f"Results: {results}")
-
-    if len(results) > 0:
-        print(f"Found valid region: {results[0].is_valid}")
-
-    if results and results[0].is_valid and debug_view:
-        warped = results[0].get_rectified_image(frame)
-        if warped is not None:
-            cv.imshow("Rectified", warped)
-            cv.waitKey(0)
-
-    cv.imshow("Data Matrix Detector", output)
-    cv.waitKey(0)
-
-    # RUN ON CAMERA
-
-    # cap = cv.VideoCapture(0)
-    # cap.set(cv.CAP_PROP_FRAME_WIDTH, 640)
-    # cap.set(cv.CAP_PROP_FRAME_HEIGHT, 480)
-    #
-    # if not cap.isOpened():
-    #     print("Error: Cannot access webcam")
-    #     return
-    #
-
-    # while True:
-    #     ret, frame = cap.read()
-    #     if not ret:
-    #         break
-    #
-    #     results = pipeline.process_frame(frame)
-    #     output = pipeline.draw_results(frame, results, debug_view)
-    #
-    #     if results and results[0].is_valid and debug_view:
-    #         warped = results[0].get_rectified_image(frame)
-    #         if warped is not None:
-    #             cv.imshow("Rectified", warped)
-    #
-    #     cv.imshow("Data Matrix Detector", output)
-    #
-    #     key = cv.waitKey(1) & 0xFF
-    #     if key == ord('q'):
-    #         break
-    #     elif key == ord('d'):
-    #         debug_view = not debug_view
-    #         print(f"Debug view: {'ON' if debug_view else 'OFF'}")
-
-    # cap.release()
     cv.destroyAllWindows()
+
 
 if __name__ == "__main__":
     main()
