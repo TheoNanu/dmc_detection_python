@@ -14,9 +14,10 @@ class DataMatrixLocation:
 
 class DashedBorderDetector:
 
-    def __init__(self, tau: int = 5, edge_threshold: int = 50):
+    def __init__(self, tau: int = 5, edge_threshold: int = 50, min_transitions: int = 9):
         self.tau = tau
         self.edge_threshold = edge_threshold
+        self.min_transitions = min_transitions
 
     def get_detection_regions(self, l_pattern: LPattern,
                               img_shape: Tuple[int, int]) -> Tuple[Tuple[int, int, int, int], Tuple[int, int, int, int]]:
@@ -27,14 +28,14 @@ class DashedBorderDetector:
         img_h, img_w = img_shape
 
         upper_x = max(0, int(x1 - tau))
-        upper_y = max(0, int(y1 - tau - (len1 - len2)))
+        upper_y = max(0, int(y1 - tau))
         upper_w = min(img_w - upper_x, int(len1 + 2 * tau))
-        upper_h = min(img_h - upper_y, int(len1 - len2 + 2 * tau))
+        upper_h = min(img_h - upper_y, int(abs(len1 - len2) + 2 * tau))
 
         right_x = min(img_w - 1, int(x3 + tau))
         right_y = max(0, int(y3 - tau))
-        right_w = min(img_w - right_x, int(len1 - len2 + 2 * tau))
-        right_h = min(img_h - right_y, int(len1 + 2 * tau))
+        right_w = min(img_w - right_x, int(abs(len1 - len2) + 2 * tau))
+        right_h = min(img_h - right_y, int(len2 + 2 * tau))
 
         upper_w = max(1, upper_w)
         upper_h = max(1, upper_h)
@@ -68,6 +69,22 @@ class DashedBorderDetector:
         return dashed_idx, solid_idx
 
     @staticmethod
+    def count_transitions(border: np.ndarray) -> int:
+        if len(border) < 2:
+            return 0
+
+        b_min, b_max = float(np.min(border)), float(np.max(border))
+
+        if b_max - b_min < 20.0:
+            return 0
+
+        threshold = (b_min + b_max) / 2.0
+        binary_border = (border > threshold).astype(np.int8)
+
+        transitions = np.sum(np.abs(np.diff(binary_border)))
+        return int(transitions)
+
+    @staticmethod
     def _auto_canny(image: np.ndarray, sigma: float = 0.33) -> np.ndarray:
         v = np.median(image)
         lower = max(0, int((1.0 - sigma) * v))
@@ -84,12 +101,33 @@ class DashedBorderDetector:
         upper_dashed_row, _ = self.scan_edge_points(edges, upper_region, 'horizontal')
         right_dashed_col, _ = self.scan_edge_points(edges, right_region, 'vertical')
 
+        upper_border_y = upper_region[1] + upper_dashed_row
+        right_border_x = right_region[0] + right_dashed_col
+
+        x_start, x_end = upper_region[0], upper_region[0] + upper_region[2]
+        upper_border = gray_img[upper_border_y, x_start:x_end]
+
+        y_start, y_end = right_region[1], right_region[1] + right_region[3]
+        right_border = gray_img[y_start:y_end, right_border_x]
+
+        cv.imshow("upper", upper_border)
+        cv.waitKey(0)
+
+        cv.imshow("right", right_border)
+        cv.waitKey(0)
+
+        t_upper = self.count_transitions(upper_border)
+        t_right = self.count_transitions(right_border)
+
+        print(f"upper transitions: {t_upper}, right transitions: {t_right}")
+
+        if t_upper < self.min_transitions or t_right < self.min_transitions:
+            print(f"rejected candidate")
+            return None
+
         x1, y1 = l_pattern.vertex1
         x2, y2 = l_pattern.corner
         x3, y3 = l_pattern.vertex2
-
-        upper_border_y = upper_region[1] + upper_dashed_row
-        right_border_x = right_region[0] + right_dashed_col
 
         min_x = min(int(x1), int(x2), int(x3))
         min_y = min(int(upper_border_y), int(y1), int(y2), int(y3))

@@ -39,13 +39,15 @@ class LFinderDetector:
                  min_angle: float = 60.0,
                  max_angle: float = 120.0,
                  max_length_ratio: float = 5.0,
-                 min_segment_length: float = 20.0):
+                 min_segment_length: float = 20.0,
+                 max_segment_length: float = 150.0):
         self.neighborhood_radius = neighborhood_radius
         self.min_angle = np.radians(min_angle)
         self.max_angle = np.radians(max_angle)
         self.max_length_ratio = max_length_ratio
         self.min_segment_length = min_segment_length
-        self.lsd = cv.createLineSegmentDetector(cv.LSD_REFINE_STD)
+        self.max_segment_length = max_segment_length
+        self.lsd = cv.createLineSegmentDetector(cv.LSD_REFINE_NONE)
 
     def detect_lines(self, region: np.ndarray) -> List[LineSegment]:
         if len(region.shape) == 3:
@@ -53,7 +55,11 @@ class LFinderDetector:
 
         clahe = cv.createCLAHE(clipLimit=2.0, tileGridSize=(4, 4))
         enhanced = clahe.apply(region)
-        blurred = cv.GaussianBlur(enhanced, (5, 5), 0)
+
+        kernel = cv.getStructuringElement(cv.MORPH_RECT, (3, 3))
+        closed_edges = cv.morphologyEx(enhanced, cv.MORPH_CLOSE, kernel)
+
+        blurred = cv.GaussianBlur(closed_edges, (5, 5), 0)
 
         lines, _, _, _ = self.lsd.detect(blurred)
 
@@ -65,7 +71,7 @@ class LFinderDetector:
                     p1=(float(x1), float(y1)),
                     p2=(float(x2), float(y2))
                 )
-                if segment.length >= self.min_segment_length:
+                if self.min_segment_length <= segment.length <= self.max_segment_length:
                     segments.append(segment)
 
         return segments
