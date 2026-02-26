@@ -129,11 +129,6 @@ class DataMatrixPipeline:
                 score=score
             ))
 
-            # region = frame[y:y + h, x:x + w]
-
-            # cv.imshow("region", region)
-            # cv.waitKey(0)
-
         results.sort(key=lambda r: r.score, reverse=True)
         return results
 

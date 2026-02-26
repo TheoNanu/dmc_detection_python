@@ -5,7 +5,7 @@ from typing import Tuple, Optional
 class GridEstimator:
     def __init__(self,
                  band_thickness: int = 11,
-                 margin: int = 30,
+                 margin: int = 5,
                  hp_sigma: int = 9,
                  pitch_range: Tuple[int, int] = (3, 40)):
         self.k = band_thickness
@@ -57,23 +57,25 @@ class GridEstimator:
 
         p2 = prof.reshape(1, -1)
         trend = cv.GaussianBlur(p2, ksize=(0, 0), sigmaX=self.hp_sigma, borderType=cv.BORDER_REPLICATE).reshape(-1)
-        # sa vad rezultatele
+        # sa vad rezultatele pentru debug
         hp = prof - trend
 
         s = hp.std()
         if s < 1e-6:
             return hp
+
         return hp / s
 
     @staticmethod
     def _autocorr(hp: np.ndarray) -> np.ndarray:
         r = np.correlate(hp, hp, mode='full').astype(np.float32)
-        # sa vad rezultatul
+        # sa vad rezultatul pentru debug
         mid = len(r) // 2
         r = r[mid:]
 
         if r[0] > 1e-6:
             r /= r[0]
+
         return r
 
     @staticmethod
@@ -103,6 +105,8 @@ class GridEstimator:
         bits = (vals < thr).astype(np.uint8)
 
         transitions = np.sum(bits[1:] != bits[:-1])
+
         return transitions / max(1, (len(bits) - 1))
 
-# sa verific valorile calculelor (debug)
+# impartire pe grid si desenarea lor pe cod data matrix pentru vizualizare
+# extragerea datelor (impartirea modulelor alb si negru in biti 0 si 1)
