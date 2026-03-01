@@ -39,29 +39,25 @@ class LFinderDetector:
                  min_angle: float = 60.0,
                  max_angle: float = 120.0,
                  max_length_ratio: float = 5.0,
-                 min_segment_length: float = 20.0,
-                 max_segment_length: float = 150.0):
+                 min_segment_length: float = 20.0):
         self.neighborhood_radius = neighborhood_radius
         self.min_angle = np.radians(min_angle)
         self.max_angle = np.radians(max_angle)
         self.max_length_ratio = max_length_ratio
         self.min_segment_length = min_segment_length
-        self.max_segment_length = max_segment_length
         self.lsd = cv.createLineSegmentDetector(cv.LSD_REFINE_NONE)
 
     def detect_lines(self, region: np.ndarray) -> List[LineSegment]:
         if len(region.shape) == 3:
             region = cv.cvtColor(region, cv.COLOR_BGR2GRAY)
 
-        clahe = cv.createCLAHE(clipLimit=2.0, tileGridSize=(4, 4))
-        enhanced = clahe.apply(region)
-
-        kernel = cv.getStructuringElement(cv.MORPH_RECT, (3, 3))
-        closed_edges = cv.morphologyEx(enhanced, cv.MORPH_CLOSE, kernel)
-
-        blurred = cv.GaussianBlur(closed_edges, (5, 5), 0)
+        blurred = cv.GaussianBlur(region, (3, 3), 0)
 
         lines, _, _, _ = self.lsd.detect(blurred)
+
+        # Use the larger region dimension as the upper length bound so that
+        # full-width L-arm segments are never filtered out.
+        max_len = max(region.shape[0], region.shape[1])
 
         segments = []
         if lines is not None:
@@ -71,7 +67,7 @@ class LFinderDetector:
                     p1=(float(x1), float(y1)),
                     p2=(float(x2), float(y2))
                 )
-                if self.min_segment_length <= segment.length <= self.max_segment_length:
+                if self.min_segment_length <= segment.length <= max_len:
                     segments.append(segment)
 
         return segments
@@ -119,7 +115,7 @@ class LFinderDetector:
         dist_score = 1.0 - connection_dist / self.neighborhood_radius
         return max(0, angle_score * 0.4 + ratio_score * 0.3 + dist_score * 0.3)
 
-    def find_l_patterns(self, segments: List[LineSegment]) -> List[LPattern]:
+    def find_l_patterns(self, frame: np.ndarray, segments: List[LineSegment]) -> List[LPattern]:
         l_patterns = []
 
         for i, seg_i in enumerate(segments):
@@ -133,21 +129,32 @@ class LFinderDetector:
                 if i >= j or seg_j.marked:
                     continue
 
+                result = self.draw_segments(frame, [seg_i, seg_j])
+                # cv.imshow("result", result)
+                # cv.waitKey(0)
+
+                print()
+
                 angle = self._angle_between_segments(seg_i, seg_j)
+                print(f"Found angle: {np.rad2deg(angle)} Min: {np.rad2deg(self.min_angle)} Max: {np.rad2deg(self.max_angle)}")
                 if not (self.min_angle <= angle <= self.max_angle):
                     continue
 
                 len_i, len_j = seg_i.length, seg_j.length
                 ratio = max(len_i, len_j) / min(len_i, len_j)
+                print(f"Found ratio: {ratio} Max: {self.max_length_ratio}")
                 if ratio > self.max_length_ratio:
                     continue
 
                 connection = self._find_connection_point(seg_i, seg_j)
+                print(f"Found connection: {connection}")
                 if connection is None:
                     continue
 
                 vertex1, corner, vertex2, conn_dist = connection
                 score = self._calculate_score(angle, ratio, conn_dist)
+
+                print(f"Score: {score}")
 
                 if score > best_score:
                     best_score = score
@@ -169,7 +176,7 @@ class LFinderDetector:
 
     def detect(self, region: np.ndarray) -> List[LPattern]:
         segments = self.detect_lines(region)
-        return self.find_l_patterns(segments)
+        return self.find_l_patterns(region, segments)
 
     @staticmethod
     def draw_segments(image: np.ndarray, segments: List[LineSegment],

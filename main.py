@@ -25,7 +25,7 @@ def main():
             warp_gray = cv.cvtColor(warped_bgr, cv.COLOR_BGR2GRAY)
 
             print("\ngrid estimator test:\n")
-            estimator = GridEstimator()
+            estimator = GridEstimator(margin=1)
 
             pitch, score = estimator.estimate_pitch(warp_gray)
 
@@ -41,6 +41,29 @@ def main():
                 nx = int(round(w_eff / pitch))
                 ny = int(round(h_eff / pitch))
 
+                data_matrix = estimator.get_matrix_data(warp_gray, h / ny, w / nx, ny, nx)
+                print(f"data matrix: {data_matrix}")
+                codewords = estimator.ecc200_codewords_from_data_modules(data_matrix)
+                print(f"codewords: {codewords}")
+
+                data_codewords = []
+                for cw in codewords:
+                    if cw == 129:  # padding, stop
+                        break
+                    if 1 <= cw <= 128:
+                        data_codewords.append(chr(cw - 1))
+                    elif 130 <= cw <= 229:
+                        data_codewords.append(f"{cw - 130:02d}")
+                    # ignore ECC codewords / mode switches for now
+
+                print("".join(data_codewords))
+
+                print(f"data codewords: {data_codewords}")
+
+                estimator.draw_grid(warp_gray, h / ny, w / nx)
+
+                cv.imshow("final grid", warp_gray)
+                cv.waitKey(0)
                 print(f"estimated matrix size: {nx} cols x {ny} rows")
 
                 if score > 0.8:

@@ -45,7 +45,7 @@ class CandidateExtraction:
 
         return processed
 
-    def contour_analysis(self, binary_map: np.ndarray, shape: Tuple[int, int]) -> List[Tuple[int, int, int, int]]:
+    def contour_analysis(self, original_image: np.ndarray, binary_map: np.ndarray, shape: Tuple[int, int]) -> List[Tuple[int, int, int, int]]:
         contours, hierarchy = cv.findContours(binary_map, cv.RETR_TREE, cv.CHAIN_APPROX_SIMPLE)
         candidate_boxes = []
         img_h, img_w = shape
@@ -55,11 +55,15 @@ class CandidateExtraction:
 
         hierarchy = hierarchy[0]
 
+        img_copy = original_image.copy()
+
         bgr_img = cv.cvtColor(binary_map, cv.COLOR_GRAY2BGR)
 
         for i, contour in enumerate(contours):
             output_img = bgr_img.copy()
-            cv.drawContours(output_img, [contour], 0, (0, 255, 0), 2)
+            cv.drawContours(img_copy, [contour], 0, (0, 255, 0), 2)
+            # cv.imshow("contour", img_copy)
+            # cv.waitKey(0)
 
             perimeter = cv.arcLength(contour, True)
             area = cv.contourArea(contour)
@@ -113,6 +117,6 @@ class CandidateExtraction:
         cv.imshow("clahe", preprocess)
         cv.waitKey(0)
 
-        candidates = self.contour_analysis(preprocess, gray.shape)
+        candidates = self.contour_analysis(frame, preprocess, gray.shape)
 
         return candidates

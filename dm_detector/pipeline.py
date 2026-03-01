@@ -78,7 +78,7 @@ class DataMatrixPipeline:
             region = gray[y:y + h, x:x + w]
 
             segments = self.l_finder.detect_lines(region)
-            l_patterns = self.l_finder.find_l_patterns(segments)
+            l_patterns = self.l_finder.find_l_patterns(cv.cvtColor(region, cv.COLOR_GRAY2BGR), segments)
 
             precise_location = None
             is_valid = False
@@ -87,6 +87,10 @@ class DataMatrixPipeline:
             if len(l_patterns) > 0:
                 l_pattern = l_patterns[0]
                 validation = self.validator.validate(region, l_pattern)
+
+                l_pattern_frame = self.draw_l_pattern(cv.cvtColor(region, cv.COLOR_GRAY2BGR), l_pattern)
+                cv.imshow("detected", l_pattern_frame)
+                cv.waitKey(0)
 
                 if validation.is_valid:
                     dashed_result = self.dashed_detector.detect(region, l_pattern)
