@@ -5,7 +5,7 @@ from typing import Tuple, Optional
 class GridEstimator:
     def __init__(self,
                  band_thickness: int = 11,
-                 margin: int = 30,
+                 margin: int = 5,
                  hp_sigma: int = 9,
                  pitch_range: Tuple[int, int] = (3, 40)):
         self.k = band_thickness
