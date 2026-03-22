@@ -34,8 +34,8 @@ class CandidateExtraction:
         edges_copy = edges.copy()
         edges_copy = cv.bitwise_not(edges_copy)
 
-        cv.imshow("edges copy", edges_copy)
-        cv.waitKey(0)
+        # cv.imshow("edges copy", edges_copy)
+        # cv.waitKey(0)
 
         kernel_dilate = cv.getStructuringElement(cv.MORPH_RECT, (4, 4))
         dilated = cv.dilate(edges_copy, kernel_dilate, iterations=1)
@@ -105,17 +105,17 @@ class CandidateExtraction:
     def get_candidates(self, frame: np.ndarray) -> list:
         gray = cv.cvtColor(frame, cv.COLOR_BGR2GRAY)
         gray = cv.GaussianBlur(gray, (65, 65), 1.8)
-        gray = cv.adaptiveThreshold(
-            gray, 255, cv.ADAPTIVE_THRESH_GAUSSIAN_C,
-            cv.THRESH_BINARY, 65, 4
-        )
         clahe = cv.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
         enhanced = clahe.apply(gray)
+        gray = cv.adaptiveThreshold(
+            enhanced, 255, cv.ADAPTIVE_THRESH_GAUSSIAN_C,
+            cv.THRESH_BINARY, 65, 4
+        )
 
-        preprocess = self.morphological_processing(enhanced)
+        preprocess = self.morphological_processing(gray)
 
-        cv.imshow("clahe", preprocess)
-        cv.waitKey(0)
+        # cv.imshow("clahe", preprocess)
+        # cv.waitKey(0)
 
         candidates = self.contour_analysis(frame, preprocess, gray.shape)
 

@@ -1,0 +1,2 @@
+gradient after full pipeline as an additional processing step (maybe covariance on the region and thresholded eigenvalues)
+l patterns of same image element detected multiple times can be discarded by translating their coords to full frame and check if they already exist

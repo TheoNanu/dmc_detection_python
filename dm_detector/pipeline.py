@@ -69,61 +69,86 @@ class DataMatrixPipeline:
         self.border_fitter = BorderFitter()
         self.dashed_detector = DashedBorderDetector()
 
+    @staticmethod
+    def parent_visited(visited: list, current: tuple):
+        for v in visited:
+            if current[0] >= v[0] and current[1] >= v[1] and current[2] <= v[2] and current[3] <= v[3]:
+                return True
+
+        return False
+
     def process_frame(self, frame: np.ndarray) -> List[DetectionResult]:
         gray = cv.cvtColor(frame, cv.COLOR_BGR2GRAY)
         candidates = self.extractor.get_candidates(frame)
         results = []
 
+        visited_candidates = []
+
         for (x, y, w, h) in candidates:
-            region = gray[y:y + h, x:x + w]
+            region = np.ascontiguousarray(gray[y:y + h, x:x + w])
+
+            cv.imshow("region", region)
+            cv.waitKey(0)
+
+            if self.parent_visited(visited_candidates, (x, y, x + w, y + h)):
+                print("REGION ALREADY VISITED")
+                continue
+            else:
+                print("REGION NOT VISITED")
+                visited_candidates.append((x, y, x + w, y + h))
 
             segments = self.l_finder.detect_lines(region)
-            l_patterns = self.l_finder.find_l_patterns(cv.cvtColor(region, cv.COLOR_GRAY2BGR), segments)
+            l_patterns = self.l_finder.find_l_patterns(cv.cvtColor(region, cv.COLOR_GRAY2BGR), region, segments)
 
             precise_location = None
             is_valid = False
             score = 0.0
 
-            if len(l_patterns) > 0:
-                l_pattern = l_patterns[0]
+            for l_pattern in l_patterns:
                 validation = self.validator.validate(region, l_pattern)
 
                 l_pattern_frame = self.draw_l_pattern(cv.cvtColor(region, cv.COLOR_GRAY2BGR), l_pattern)
+                lx, ly, lw, lh = l_pattern.get_bounding_box()
+                cv.rectangle(l_pattern_frame, (lx, ly), (lx + lw, ly + lh), (0, 0, 255), 1)
                 cv.imshow("detected", l_pattern_frame)
                 cv.waitKey(0)
 
-                if validation.is_valid:
-                    dashed_result = self.dashed_detector.detect(region, l_pattern)
-                    precise_location = self.border_fitter.fit(region, l_pattern, rough_location=dashed_result)
+                if not validation.is_valid:
+                    print("PATTERN NOT VALIDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD")
+                    continue
 
-                    l_pattern_frame = self.draw_l_pattern(cv.cvtColor(region, cv.COLOR_GRAY2BGR), l_pattern)
-                    cv.imshow("detected", l_pattern_frame)
-                    cv.waitKey(0)
+                dashed_result = self.dashed_detector.detect(region, l_pattern)
+                precise_location = self.border_fitter.fit(region, l_pattern, rough_location=dashed_result)
 
-                    if precise_location is None and dashed_result is not None:
-                        bx, by, bw, bh = dashed_result.bounding_box
-                        vertices = [
-                            (float(bx), float(by)),
-                            (float(bx + bw), float(by)),
-                            (float(bx + bw), float(by + bh)),
-                            (float(bx), float(by + bh))
-                        ]
-                        center = (float(bx + bw / 2), float(by + bh / 2))
+                l_pattern_frame = self.draw_l_pattern(cv.cvtColor(region, cv.COLOR_GRAY2BGR), l_pattern)
+                # cv.imshow("detected", l_pattern_frame)
+                # cv.waitKey(0)
 
-                        precise_location = PreciseLocation(
-                            vertices=vertices,
-                            center=center,
-                            angle=0.0,
-                            size=(float(bw), float(bh))
-                        )
+                if precise_location is None and dashed_result is not None:
+                    bx, by, bw, bh = dashed_result.bounding_box
+                    vertices = [
+                        (float(bx), float(by)),
+                        (float(bx + bw), float(by)),
+                        (float(bx + bw), float(by + bh)),
+                        (float(bx), float(by + bh))
+                    ]
+                    center = (float(bx + bw / 2), float(by + bh / 2))
 
-                    if precise_location:
-                        global_vertices = [(vx + x, vy + y) for vx, vy in precise_location.vertices]
-                        precise_location.vertices = global_vertices
-                        precise_location.center = (precise_location.center[0] + x, precise_location.center[1] + y)
+                    precise_location = PreciseLocation(
+                        vertices=vertices,
+                        center=center,
+                        angle=0.0,
+                        size=(float(bw), float(bh))
+                    )
 
-                    is_valid = True
-                    score = validation.score
+                if precise_location:
+                    global_vertices = [(vx + x, vy + y) for vx, vy in precise_location.vertices]
+                    precise_location.vertices = global_vertices
+                    precise_location.center = (precise_location.center[0] + x, precise_location.center[1] + y)
+
+                is_valid = True
+                score = validation.score
+                break
 
             results.append(DetectionResult(
                 candidate_box=(x, y, w, h),
@@ -145,16 +170,19 @@ class DataMatrixPipeline:
             x, y, w, h = result.candidate_box
 
             if result.precise_location and result.is_valid:
+                print("DMC DETECTED")
                 vertices = result.precise_location.get_ordered_vertices()
                 pts = np.array(vertices, dtype=np.int32)
                 cv.polylines(output, [pts], True, (0, 255, 0), 2)
 
                 if debug_view:
+                    print("DMC DETECTED, DRAWING CANDIDATE")
                     cx, cy = int(result.precise_location.center[0]), int(result.precise_location.center[1])
-                    cv.circle(output, (cx, cy), 3, (255, 0, 0), -1)
+                    cv.circle(output, (cx, cy), 10, (255, 0, 0), -1)
 
             elif debug_view:
-                cv.rectangle(output, (x, y), (x + w, y + h), (0, 0, 255), 1)
+                print("DMC NOT DETECTED BUT DRAWING CANDIDATE")
+                # cv.rectangle(output, (x, y), (x + w, y + h), (0, 0, 255), 1)
 
         return output
 

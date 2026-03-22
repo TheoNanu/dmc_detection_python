@@ -30,11 +30,11 @@ class DashedBorderDetector:
         upper_x = max(0, int(x1 - tau))
         upper_y = max(0, int(y1 - tau))
         upper_w = min(img_w - upper_x, int(len1 + 2 * tau))
-        upper_h = min(img_h - upper_y, int(abs(len1 - len2) + 2 * tau))
+        upper_h = min(img_h - upper_y, int(len1 * 0.3 + 2 * tau))
 
         right_x = min(img_w - 1, int(x3 + tau))
         right_y = max(0, int(y3 - tau))
-        right_w = min(img_w - right_x, int(abs(len1 - len2) + 2 * tau))
+        right_w = min(img_w - right_x, int(len2 * 0.3 + 2 * tau))
         right_h = min(img_h - right_y, int(len2 + 2 * tau))
 
         upper_w = max(1, upper_w)
@@ -110,11 +110,11 @@ class DashedBorderDetector:
         y_start, y_end = right_region[1], right_region[1] + right_region[3]
         right_border = gray_img[y_start:y_end, right_border_x]
 
-        cv.imshow("upper", upper_border)
-        cv.waitKey(0)
-
-        cv.imshow("right", right_border)
-        cv.waitKey(0)
+        # cv.imshow("upper", upper_border)
+        # cv.waitKey(0)
+        #
+        # cv.imshow("right", right_border)
+        # cv.waitKey(0)
 
         t_upper = self.count_transitions(upper_border)
         t_right = self.count_transitions(right_border)

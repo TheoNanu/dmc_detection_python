@@ -115,7 +115,47 @@ class LFinderDetector:
         dist_score = 1.0 - connection_dist / self.neighborhood_radius
         return max(0, angle_score * 0.4 + ratio_score * 0.3 + dist_score * 0.3)
 
-    def find_l_patterns(self, frame: np.ndarray, segments: List[LineSegment]) -> List[LPattern]:
+    @staticmethod
+    def _interior_is_high_frequency(gray: np.ndarray, pattern: LPattern,
+                                    min_eigenvalue: float = 100.0,
+                                    max_isotropy_ratio: float = 10.0) -> bool:
+        img_h, img_w = gray.shape[:2]
+        lx, ly, lw, lh = pattern.get_bounding_box()
+        x1, y1 = max(0, lx), max(0, ly)
+        x2, y2 = min(img_w, lx + lw), min(img_h, ly + lh)
+
+        if x2 - x1 < 8 or y2 - y1 < 8:
+            return False
+
+        roi = gray[y1:y2, x1:x2].astype(np.float32)
+
+        gx = cv.Sobel(roi, cv.CV_32F, 1, 0, ksize=3)
+        gy = cv.Sobel(roi, cv.CV_32F, 0, 1, ksize=3)
+
+        cov_xx = float(np.mean(gx * gx))
+        cov_yy = float(np.mean(gy * gy))
+        cov_xy = float(np.mean(gx * gy))
+
+        # Eigenvalues of the 2x2 covariance matrix
+        trace = cov_xx + cov_yy
+        det = cov_xx * cov_yy - cov_xy * cov_xy
+        disc = max(0.0, (trace / 2) ** 2 - det)
+        l1 = trace / 2 + np.sqrt(disc)
+        l2 = trace / 2 - np.sqrt(disc)
+
+        print(f"Structure tensor eigenvalues: λ1={l1:.1f}, λ2={l2:.1f}")
+
+        if l2 < min_eigenvalue:
+            print(f"  rejected: λ2 too small (not high-frequency enough)")
+            return False
+
+        if l1 > max_isotropy_ratio * l2:
+            print(f"  rejected: too anisotropic (single edge, not DMC interior)")
+            return False
+
+        return True
+
+    def find_l_patterns(self, frame: np.ndarray, gray: np.ndarray, segments: List[LineSegment]) -> List[LPattern]:
         l_patterns = []
 
         for i, seg_i in enumerate(segments):
@@ -123,17 +163,12 @@ class LFinderDetector:
                 continue
 
             best_pattern = None
-            best_score = 0
+            best_score = 0.0
+            best_j = -1
 
             for j, seg_j in enumerate(segments):
                 if i >= j or seg_j.marked:
                     continue
-
-                result = self.draw_segments(frame, [seg_i, seg_j])
-                # cv.imshow("result", result)
-                # cv.waitKey(0)
-
-                print()
 
                 angle = self._angle_between_segments(seg_i, seg_j)
                 print(f"Found angle: {np.rad2deg(angle)} Min: {np.rad2deg(self.min_angle)} Max: {np.rad2deg(self.max_angle)}")
@@ -151,13 +186,17 @@ class LFinderDetector:
                 if connection is None:
                     continue
 
+                result = self.draw_segments(frame, [seg_i, seg_j])
+
                 vertex1, corner, vertex2, conn_dist = connection
                 score = self._calculate_score(angle, ratio, conn_dist)
 
                 print(f"Score: {score}")
 
                 if score > best_score:
+                    print(f"Best score found: {score} > {best_score}")
                     best_score = score
+                    best_j = j
                     best_pattern = LPattern(
                         vertex1=vertex1,
                         corner=corner,
@@ -166,13 +205,22 @@ class LFinderDetector:
                         len2=min(len_i, len_j),
                         score=score
                     )
+                else:
+                    print(f"Not best score: {score} < {best_score}")
+
+                cv.imshow("result", result)
+                cv.waitKey(0)
 
             if best_pattern and best_score > 0.5:
+                if not self._interior_is_high_frequency(gray, best_pattern):
+                    continue
                 l_patterns.append(best_pattern)
                 seg_i.marked = True
+                if best_j >= 0:
+                    segments[best_j].marked = True
 
         l_patterns.sort(key=lambda p: p.score, reverse=True)
-        return l_patterns[:1] if l_patterns else []
+        return l_patterns
 
     def detect(self, region: np.ndarray) -> List[LPattern]:
         segments = self.detect_lines(region)

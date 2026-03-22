@@ -58,8 +58,8 @@ class GridEstimator:
         cv.imshow("band", visualize)
         cv.waitKey(0)
         visualize = visualize.astype(np.float32)
-        cv.imshow("cast", visualize)
-        cv.waitKey(0)
+        # cv.imshow("cast", visualize)
+        # cv.waitKey(0)
         prof = np.median(band, axis=0)
         return prof
 

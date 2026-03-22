@@ -3,7 +3,7 @@ from dm_detector.pipeline import DataMatrixPipeline
 from dm_decoder.grid_estimation.estimator import GridEstimator
 
 def main():
-    image_path = "./test_images/dmc_sample2.jpeg"
+    image_path = "./test_images/img.png"
     frame = cv.imread(image_path)
 
     if frame is None:
@@ -13,7 +13,7 @@ def main():
     detector = DataMatrixPipeline()
     results = detector.process_frame(frame)
 
-    output_frame = detector.draw_results(frame, results)
+    output_frame = detector.draw_results(frame, results, debug_view=True)
     cv.imshow("1. detection", output_frame)
 
     if results and results[0].is_valid:
@@ -41,7 +41,7 @@ def main():
                 nx = int(round(w_eff / pitch))
                 ny = int(round(h_eff / pitch))
 
-                data_matrix = estimator.get_matrix_data(warp_gray, h / ny, w / nx, ny, nx)
+                data_matrix = estimator.get_matrix_data(warp_gray, w / nx, h / ny, ny, nx)
                 print(f"data matrix: {data_matrix}")
                 codewords = estimator.ecc200_codewords_from_data_modules(data_matrix)
                 print(f"codewords: {codewords}")
