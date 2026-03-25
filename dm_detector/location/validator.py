@@ -40,7 +40,7 @@ class DataMatrixValidator:
             return ValidationResult(False, 0, aspect_ratio, 0)
 
         # Crop to the L-pattern bounding box so large regions don't dilute density
-        lx, ly, lw, lh = l_pattern.get_bounding_box()
+        lx, ly, lw, lh = l_pattern.get_bounding_box(padding=5)
         x1, y1 = max(0, lx), max(0, ly)
         x2, y2 = min(w, lx + lw), min(h, ly + lh)
         roi = gray_region[y1:y2, x1:x2] if x2 > x1 and y2 > y1 else gray_region
@@ -53,6 +53,9 @@ class DataMatrixValidator:
         cv.imshow("roi_enhanced", roi_enhanced)
         edges = cv.Canny(roi_enhanced, 50, 150)
         cv.imshow("edges", edges)
+        cv.resizeWindow("roi", 640, 480)
+        cv.resizeWindow("roi_enhanced", 640, 480)
+        cv.resizeWindow("edges", 640, 480)
         cv.waitKey(0)
 
         edge_pixels = np.count_nonzero(edges)

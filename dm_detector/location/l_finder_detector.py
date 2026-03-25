@@ -26,12 +26,21 @@ class LPattern:
     len2: float
     score: float = 0.0
 
-    def get_bounding_box(self) -> Tuple[int, int, int, int]:
+    def get_bounding_box(self, padding: int = 0) -> Tuple[int, int, int, int]:
         xs = [self.vertex1[0], self.corner[0], self.vertex2[0]]
         ys = [self.vertex1[1], self.corner[1], self.vertex2[1]]
+        fourth_corner_x = self.vertex1[0] + self.vertex2[0] - self.corner[0]
+        fourth_corner_y = self.vertex1[1] + self.vertex2[1] - self.corner[1]
+        pts = np.array([self.vertex1, self.vertex2, self.corner, (fourth_corner_x, fourth_corner_y)], dtype=np.float32)
+        x, y, w, h = cv.boundingRect(pts.astype(np.int32))
+        if padding != 0:
+            x = x - padding
+            y = y - padding
+            w = w + padding
+            h = h + padding
         x_min, x_max = int(min(xs)), int(max(xs))
         y_min, y_max = int(min(ys)), int(max(ys))
-        return x_min, y_min, x_max - x_min, y_max - y_min
+        return x, y, w, h
 
 class LFinderDetector:
     def __init__(self,
@@ -120,12 +129,17 @@ class LFinderDetector:
                                     min_eigenvalue: float = 100.0,
                                     max_isotropy_ratio: float = 10.0) -> bool:
         img_h, img_w = gray.shape[:2]
-        lx, ly, lw, lh = pattern.get_bounding_box()
+        lx, ly, lw, lh = pattern.get_bounding_box(padding=5)
         x1, y1 = max(0, lx), max(0, ly)
         x2, y2 = min(img_w, lx + lw), min(img_h, ly + lh)
 
         if x2 - x1 < 8 or y2 - y1 < 8:
             return False
+
+        roi = gray[y1:y2, x1:x2]
+
+        cv.imshow("l pattern freq test", roi)
+        cv.resizeWindow("l pattern freq test", 640, 480)
 
         roi = gray[y1:y2, x1:x2].astype(np.float32)
 
@@ -171,18 +185,18 @@ class LFinderDetector:
                     continue
 
                 angle = self._angle_between_segments(seg_i, seg_j)
-                print(f"Found angle: {np.rad2deg(angle)} Min: {np.rad2deg(self.min_angle)} Max: {np.rad2deg(self.max_angle)}")
+                # print(f"Found angle: {np.rad2deg(angle)} Min: {np.rad2deg(self.min_angle)} Max: {np.rad2deg(self.max_angle)}")
                 if not (self.min_angle <= angle <= self.max_angle):
                     continue
 
                 len_i, len_j = seg_i.length, seg_j.length
                 ratio = max(len_i, len_j) / min(len_i, len_j)
-                print(f"Found ratio: {ratio} Max: {self.max_length_ratio}")
+                # print(f"Found ratio: {ratio} Max: {self.max_length_ratio}")
                 if ratio > self.max_length_ratio:
                     continue
 
                 connection = self._find_connection_point(seg_i, seg_j)
-                print(f"Found connection: {connection}")
+                # print(f"Found connection: {connection}")
                 if connection is None:
                     continue
 
@@ -191,10 +205,10 @@ class LFinderDetector:
                 vertex1, corner, vertex2, conn_dist = connection
                 score = self._calculate_score(angle, ratio, conn_dist)
 
-                print(f"Score: {score}")
+                # print(f"Score: {score}")
 
                 if score > best_score:
-                    print(f"Best score found: {score} > {best_score}")
+                    # print(f"Best score found: {score} > {best_score}")
                     best_score = score
                     best_j = j
                     best_pattern = LPattern(
@@ -206,13 +220,14 @@ class LFinderDetector:
                         score=score
                     )
                 else:
-                    print(f"Not best score: {score} < {best_score}")
+                    pass
+                    # print(f"Not best score: {score} < {best_score}")
 
                 cv.imshow("result", result)
                 cv.waitKey(0)
 
             if best_pattern and best_score > 0.5:
-                if not self._interior_is_high_frequency(gray, best_pattern):
+                if not self._interior_is_high_frequency(gray, best_pattern, min_eigenvalue=1000, max_isotropy_ratio=1.7):
                     continue
                 l_patterns.append(best_pattern)
                 seg_i.marked = True

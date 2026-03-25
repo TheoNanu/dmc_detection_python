@@ -85,16 +85,22 @@ class DataMatrixPipeline:
         visited_candidates = []
 
         for (x, y, w, h) in candidates:
-            region = np.ascontiguousarray(gray[y:y + h, x:x + w])
+            # region = np.ascontiguousarray(gray[y:y + h, x:x + w])
+            region = gray[y:y + h, x:x + w]
 
-            cv.imshow("region", region)
+            region_in_original = cv.rectangle(frame.copy(), (x, y), (x + w, y + h), (0, 255, 0), 2)
+
+            cv.imshow("current region", region)
+            # cv.resizeWindow("current region", 640, 480)
+            cv.imshow("region in original", region_in_original)
+            print(f"Window correct dimension: {h}x{w}, real dimension: {region.shape[0]}x{region.shape[1]}")
             cv.waitKey(0)
 
             if self.parent_visited(visited_candidates, (x, y, x + w, y + h)):
-                print("REGION ALREADY VISITED")
+                # print("REGION ALREADY VISITED")
                 continue
             else:
-                print("REGION NOT VISITED")
+                # print("REGION NOT VISITED")
                 visited_candidates.append((x, y, x + w, y + h))
 
             segments = self.l_finder.detect_lines(region)
@@ -108,9 +114,9 @@ class DataMatrixPipeline:
                 validation = self.validator.validate(region, l_pattern)
 
                 l_pattern_frame = self.draw_l_pattern(cv.cvtColor(region, cv.COLOR_GRAY2BGR), l_pattern)
-                lx, ly, lw, lh = l_pattern.get_bounding_box()
+                lx, ly, lw, lh = l_pattern.get_bounding_box(padding=5)
                 cv.rectangle(l_pattern_frame, (lx, ly), (lx + lw, ly + lh), (0, 0, 255), 1)
-                cv.imshow("detected", l_pattern_frame)
+                cv.imshow("validated l pattern", l_pattern_frame)
                 cv.waitKey(0)
 
                 if not validation.is_valid:
@@ -170,7 +176,7 @@ class DataMatrixPipeline:
             x, y, w, h = result.candidate_box
 
             if result.precise_location and result.is_valid:
-                print("DMC DETECTED")
+                # print("DMC DETECTED")
                 vertices = result.precise_location.get_ordered_vertices()
                 pts = np.array(vertices, dtype=np.int32)
                 cv.polylines(output, [pts], True, (0, 255, 0), 2)
@@ -181,7 +187,8 @@ class DataMatrixPipeline:
                     cv.circle(output, (cx, cy), 10, (255, 0, 0), -1)
 
             elif debug_view:
-                print("DMC NOT DETECTED BUT DRAWING CANDIDATE")
+                pass
+                # print("DMC NOT DETECTED BUT DRAWING CANDIDATE")
                 # cv.rectangle(output, (x, y), (x + w, y + h), (0, 0, 255), 1)
 
         return output

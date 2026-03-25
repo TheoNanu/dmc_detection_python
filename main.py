@@ -3,7 +3,7 @@ from dm_detector.pipeline import DataMatrixPipeline
 from dm_decoder.grid_estimation.estimator import GridEstimator
 
 def main():
-    image_path = "./test_images/img.png"
+    image_path = "./test_images/dmc_test_image.png"
     frame = cv.imread(image_path)
 
     if frame is None:
