@@ -3,7 +3,7 @@ from dm_detector.pipeline import DataMatrixPipeline
 from dm_decoder.grid_estimation.estimator import GridEstimator
 
 def main():
-    image_path = "./test_images/img.png"
+    image_path = "./test_images/dmc_on_object_test_image.png"
     frame = cv.imread(image_path)
 
     if frame is None:
@@ -20,9 +20,13 @@ def main():
         warped_bgr = results[0].get_rectified_image(frame, output_size=400)
 
         if warped_bgr is not None:
+            clahe = cv.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+            warped_bgr = clahe.apply(cv.cvtColor(warped_bgr, cv.COLOR_BGR2GRAY))
             cv.imshow("2. rectified image (warped)", warped_bgr)
 
-            warp_gray = cv.cvtColor(warped_bgr, cv.COLOR_BGR2GRAY)
+            # warp_gray = cv.cvtColor(warped_bgr, cv.COLOR_BGR2GRAY)
+
+            warp_gray = warped_bgr
 
             print("\ngrid estimator test:\n")
             estimator = GridEstimator(margin=1)

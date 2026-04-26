@@ -48,15 +48,15 @@ class GridEstimator:
     @staticmethod
     def _median_profile_from_band(img: np.ndarray, y0: int, y1: int, x0: int, x1: int) -> np.ndarray:
         # cv.rectangle(img, (x0, y0), (x1, y1), (0, 0, 255), 1)
-        cv.imshow("original", img)
+        # cv.imshow("original", img)
         print(f"x0: {x0}, y0: {y0}, x1: {x1}, y1: {y1}")
         band = img[y0:y1, x0:x1]
         visualize = cv.resize(band, (band.shape[1] * 4, band.shape[0] * 4))
         print(f"Original band: {band}")
         band = band.astype(np.float32)
         print(f"Casted band: {band}")
-        cv.imshow("band", visualize)
-        cv.waitKey(0)
+        # cv.imshow("band", visualize)
+        # cv.waitKey(0)
         visualize = visualize.astype(np.float32)
         # cv.imshow("cast", visualize)
         # cv.waitKey(0)

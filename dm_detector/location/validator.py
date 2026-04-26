@@ -9,11 +9,12 @@ class ValidationResult:
     edge_density: float
     aspect_ratio: float
     score: float
+    reason: str = ""
 
 class DataMatrixValidator:
 
     def __init__(self,
-                 min_edge_density: float = 0.05,
+                 min_edge_density: float = 0.003,
                  max_edge_density: float = 0.75,
                  min_aspect_ratio: float = 0.5,
                  max_aspect_ratio: float = 2.0,
@@ -28,16 +29,18 @@ class DataMatrixValidator:
         h, w = gray_region.shape[:2]
 
         if h < self.min_size or w < self.min_size:
-            print(f"Validator rejected: region too small ({w}x{h})")
-            return ValidationResult(False, 0, 0, 0)
+            reason = f"region too small ({w}x{h})"
+            print(f"[validator] rejected: {reason}")
+            return ValidationResult(False, 0, 0, 0, reason)
 
         # Check the L-pattern arm ratio, not the region's aspect ratio —
         # the candidate bounding box can be any shape
         aspect_ratio = max(w, h) / min(w, h)
         len_ratio = l_pattern.len1 / (l_pattern.len2 + 1e-6)
         if len_ratio > 2.5:
-            print(f"Validator rejected: L-arm ratio too large ({len_ratio:.2f})")
-            return ValidationResult(False, 0, aspect_ratio, 0)
+            reason = f"L-arm ratio too large ({len_ratio:.2f})"
+            print(f"[validator] rejected: {reason}")
+            return ValidationResult(False, 0, aspect_ratio, 0, reason)
 
         # Crop to the L-pattern bounding box so large regions don't dilute density
         lx, ly, lw, lh = l_pattern.get_bounding_box()
@@ -49,29 +52,39 @@ class DataMatrixValidator:
         clahe = cv.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
         roi_enhanced = clahe.apply(roi)
 
-        cv.imshow("roi", roi)
-        cv.imshow("roi_enhanced", roi_enhanced)
+        # cv.imshow("roi", roi)
+        # cv.imshow("roi_enhanced", roi_enhanced)
         edges = cv.Canny(roi_enhanced, 50, 150)
-        cv.imshow("edges", edges)
-        cv.waitKey(0)
+        # cv.imshow("edges", edges)
+        # cv.waitKey(0)
 
         edge_pixels = np.count_nonzero(edges)
         edge_density = float(edge_pixels) / (roi.shape[0] * roi.shape[1])
 
         if not (self.min_edge_density <= edge_density <= self.max_edge_density):
-            print(f"Validator rejected: edge density {edge_density:.3f} out of range [{self.min_edge_density}, {self.max_edge_density}]")
-            return ValidationResult(False, edge_density, aspect_ratio, 0)
+            reason = f"edge density {edge_density:.4f} out of [{self.min_edge_density}, {self.max_edge_density}]"
+            print(f"[validator] rejected: {reason}")
+            return ValidationResult(False, edge_density, aspect_ratio, 0, reason)
 
-        density_score = max(0.0, 1.0 - abs(edge_density - 0.3) / 0.3)
+        # Edge density depends on module pixel size (~ 2/P^2), so it is not
+        # scale-invariant and can't be turned into a useful score on its own.
+        # The L-finder's structure-tensor check already validates interior
+        # texture, so we gate only on the permissive density range and use
+        # the L-score as the validator score.
         l_score = l_pattern.score if hasattr(l_pattern, 'score') else 0.5
+        total_score = l_score
 
-        total_score = density_score * 0.4 + l_score * 0.6
-
-        print(f"Validator: edge_density={edge_density:.3f} (score={density_score:.2f}), l_score={l_score:.2f} -> total={total_score:.2f}")
+        if total_score > 0.4:
+            reason = f"score={total_score:.2f} density={edge_density:.4f} l={l_score:.2f}"
+            print(f"[validator] accepted: {reason}")
+        else:
+            reason = f"l_score {l_score:.2f} <= 0.4 (density={edge_density:.4f})"
+            print(f"[validator] rejected: {reason}")
 
         return ValidationResult(
             is_valid=total_score > 0.4,
             edge_density=edge_density,
             aspect_ratio=aspect_ratio,
-            score=total_score
+            score=total_score,
+            reason=reason
         )

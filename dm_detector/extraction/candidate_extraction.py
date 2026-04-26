@@ -60,10 +60,7 @@ class CandidateExtraction:
         bgr_img = cv.cvtColor(binary_map, cv.COLOR_GRAY2BGR)
 
         for i, contour in enumerate(contours):
-            output_img = bgr_img.copy()
             cv.drawContours(img_copy, [contour], 0, (0, 255, 0), 2)
-            # cv.imshow("contour", img_copy)
-            # cv.waitKey(0)
 
             perimeter = cv.arcLength(contour, True)
             area = cv.contourArea(contour)
@@ -77,34 +74,22 @@ class CandidateExtraction:
                     child_count += 1
                     current = hierarchy[current][0]
 
-            print(f"Contour number: {i}")
-            print(f"Perimeter: {perimeter}, min perimeter: {self.min_perimeter}")
-            print(f"Area: {area}, min area: {self.min_area}")
-            print(f"Found childs: {child_count}")
-
             if perimeter > self.min_perimeter and area > self.min_area:
                 x, y, w, h = cv.boundingRect(contour)
-
-                print(f"x: {x} y: {y} w: {w} h: {h}")
-                print(self.padding)
 
                 x_new = max(0, x - self.padding)
                 y_new = max(0, y - self.padding)
                 w_new = min(img_w - x_new, w + 2 * self.padding)
                 h_new = min(img_h - y_new, h + 2 * self.padding)
 
-                print(f"x_new: {x_new} y_new: {y_new} w_new: {w_new} h_new: {h_new}")
-
+                print(f"[extraction] contour {i}: accepted box ({x_new},{y_new},{w_new},{h_new}) perim={perimeter:.0f} area={area:.0f}")
                 candidate_boxes.append((x_new, y_new, w_new, h_new))
-            else:
-                if child_count < self.min_children and (perimeter > self.min_perimeter or area > self.min_area):
-                    print("Rejected contour")
 
         return candidate_boxes
 
     def get_candidates(self, frame: np.ndarray) -> list:
         gray = cv.cvtColor(frame, cv.COLOR_BGR2GRAY)
-        gray = cv.GaussianBlur(gray, (65, 65), 1.8)
+        gray = cv.GaussianBlur(gray, (11, 11), 1.8)
         clahe = cv.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
         enhanced = clahe.apply(gray)
         gray = cv.adaptiveThreshold(
@@ -114,8 +99,8 @@ class CandidateExtraction:
 
         preprocess = self.morphological_processing(gray)
 
-        # cv.imshow("clahe", preprocess)
-        # cv.waitKey(0)
+        cv.imshow("clahe", preprocess)
+        cv.waitKey(0)
 
         candidates = self.contour_analysis(frame, preprocess, gray.shape)
 

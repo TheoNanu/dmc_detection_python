@@ -33,16 +33,30 @@ class DetectionResult:
         cx, cy, _, _ = self.candidate_box
 
         src_corner = np.array([l_pat.corner[0] + cx, l_pat.corner[1] + cy])
-        src_v1 = np.array([l_pat.vertex1[0] + cx, l_pat.vertex1[1] + cy])
-        src_v2 = np.array([l_pat.vertex2[0] + cx, l_pat.vertex2[1] + cy])
-        src_v3 = src_v1 + src_v2 - src_corner
 
-        ordered_src = np.array([
-            src_corner,
-            src_v1,
-            src_v3,
-            src_v2
-        ], dtype=np.float32)
+        arm1 = np.array(l_pat.vertex1) - np.array(l_pat.corner)
+        arm2 = np.array(l_pat.vertex2) - np.array(l_pat.corner)
+        if abs(arm1[0]) > abs(arm1[1]):
+            src_horiz = np.array([l_pat.vertex1[0] + cx, l_pat.vertex1[1] + cy])
+            src_vert = np.array([l_pat.vertex2[0] + cx, l_pat.vertex2[1] + cy])
+        else:
+            src_horiz = np.array([l_pat.vertex2[0] + cx, l_pat.vertex2[1] + cy])
+            src_vert = np.array([l_pat.vertex1[0] + cx, l_pat.vertex1[1] + cy])
+
+        vertices = [np.asarray(v, dtype=np.float32) for v in self.precise_location.vertices]
+        remaining = list(range(len(vertices)))
+
+        # dst index mapping: corner → 0 (BL), horiz → 1 (BR), vert → 3 (TL), leftover → 2 (TR)
+        assignments = [(src_corner, 0), (src_horiz, 1), (src_vert, 3)]
+
+        ordered_src = [None] * 4
+        for l_pt, dst_idx in assignments:
+            best_i = min(remaining, key=lambda i: np.linalg.norm(vertices[i] - l_pt))
+            ordered_src[dst_idx] = vertices[best_i]
+            remaining.remove(best_i)
+
+        ordered_src[2] = vertices[remaining[0]]  # leftover → TR
+        ordered_src = np.array(ordered_src, dtype=np.float32)
 
         M = cv.getPerspectiveTransform(ordered_src, dst_pts)
         return cv.warpPerspective(full_frame, M, (output_size, output_size))
@@ -84,6 +98,9 @@ class DataMatrixPipeline:
 
         visited_candidates = []
 
+        # sort candidates from the highest area to the lowest area to take advantage of the deduplication strategy
+        candidates.sort(reverse=True, key=lambda c: c[2] * c[3])
+
         for (x, y, w, h) in candidates:
             region = np.ascontiguousarray(gray[y:y + h, x:x + w])
 
@@ -91,40 +108,44 @@ class DataMatrixPipeline:
             cv.waitKey(0)
 
             if self.parent_visited(visited_candidates, (x, y, x + w, y + h)):
-                print("REGION ALREADY VISITED")
+                # print(f"[pipeline] region ({x},{y},{w},{h}) skipped: parent already visited")
                 continue
-            else:
-                print("REGION NOT VISITED")
-                visited_candidates.append((x, y, x + w, y + h))
+            visited_candidates.append((x, y, x + w, y + h))
+            # print(f"[pipeline] processing region ({x},{y},{w},{h})")
 
             segments = self.l_finder.detect_lines(region)
             l_patterns = self.l_finder.find_l_patterns(cv.cvtColor(region, cv.COLOR_GRAY2BGR), region, segments)
 
-            precise_location = None
-            is_valid = False
-            score = 0.0
+            # print(f"[pipeline] l_patterns found: {len(l_patterns)}")
 
-            for l_pattern in l_patterns:
+            region_has_valid = False
+
+            for idx, l_pattern in enumerate(l_patterns):
                 validation = self.validator.validate(region, l_pattern)
 
-                l_pattern_frame = self.draw_l_pattern(cv.cvtColor(region, cv.COLOR_GRAY2BGR), l_pattern)
-                lx, ly, lw, lh = l_pattern.get_bounding_box()
-                cv.rectangle(l_pattern_frame, (lx, ly), (lx + lw, ly + lh), (0, 0, 255), 1)
-                cv.imshow("detected", l_pattern_frame)
-                cv.waitKey(0)
+                label = f"#{idx} VALIDATOR {'ACCEPT' if validation.is_valid else 'REJECT'}: {validation.reason}"
+                self.l_finder._show_pattern(
+                    cv.cvtColor(region, cv.COLOR_GRAY2BGR),
+                    l_pattern, label, validation.is_valid, window="detected"
+                )
 
                 if not validation.is_valid:
-                    print("PATTERN NOT VALIDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD")
                     continue
 
-                dashed_result = self.dashed_detector.detect(region, l_pattern)
-                precise_location = self.border_fitter.fit(region, l_pattern, rough_location=dashed_result)
+                dashed_result, edges = self.dashed_detector.detect(region, l_pattern)
+                dashed_label = f"#{idx} DASHED {'ACCEPT' if dashed_result is not None else 'REJECT'}"
+                self.l_finder._show_pattern(
+                    cv.cvtColor(region, cv.COLOR_GRAY2BGR),
+                    l_pattern, dashed_label, dashed_result is not None, window="detected"
+                )
 
-                l_pattern_frame = self.draw_l_pattern(cv.cvtColor(region, cv.COLOR_GRAY2BGR), l_pattern)
-                # cv.imshow("detected", l_pattern_frame)
-                # cv.waitKey(0)
+                if dashed_result is None:
+                    continue
 
-                if precise_location is None and dashed_result is not None:
+                precise_location = self.border_fitter.fit(region, edges, l_pattern, rough_location=dashed_result)
+
+                if precise_location is None:
+                    print(f"[pipeline] precise location not found")
                     bx, by, bw, bh = dashed_result.bounding_box
                     vertices = [
                         (float(bx), float(by)),
@@ -140,23 +161,33 @@ class DataMatrixPipeline:
                         angle=0.0,
                         size=(float(bw), float(bh))
                     )
+                else:
+                    print(f"[pipeline] precise location found: {precise_location.vertices}")
+                    cv.drawContours(region, [np.int32(precise_location.vertices)], 0, (0, 0, 255), 2)
+                    cv.imshow("precise location", region)
+                    cv.waitKey(0)
 
-                if precise_location:
-                    global_vertices = [(vx + x, vy + y) for vx, vy in precise_location.vertices]
-                    precise_location.vertices = global_vertices
-                    precise_location.center = (precise_location.center[0] + x, precise_location.center[1] + y)
+                global_vertices = [(vx + x, vy + y) for vx, vy in precise_location.vertices]
+                precise_location.vertices = global_vertices
+                precise_location.center = (precise_location.center[0] + x, precise_location.center[1] + y)
 
-                is_valid = True
-                score = validation.score
-                break
+                results.append(DetectionResult(
+                    candidate_box=(x, y, w, h),
+                    precise_location=precise_location,
+                    l_patterns=[l_pattern],
+                    is_valid=True,
+                    score=validation.score
+                ))
+                region_has_valid = True
 
-            results.append(DetectionResult(
-                candidate_box=(x, y, w, h),
-                precise_location=precise_location,
-                l_patterns=l_patterns,
-                is_valid=is_valid,
-                score=score
-            ))
+            # if not region_has_valid:
+            #     results.append(DetectionResult(
+            #         candidate_box=(x, y, w, h),
+            #         precise_location=None,
+            #         l_patterns=l_patterns,
+            #         is_valid=False,
+            #         score=0.0
+            #     ))
 
         results.sort(key=lambda r: r.score, reverse=True)
         return results
