@@ -282,7 +282,7 @@ class DashedBorderDetector:
             vis[row, col] = (0, 0, 255)
         for (col, row) in right_coords:
             vis[row, col] = (0, 0, 255)
-        cv.imshow("sampled borders", vis)
+        cv.imshow("sampled borders", cv.resize(vis, dsize=None, fx=3.0, fy=3.0, interpolation=cv.INTER_NEAREST))
         cv.waitKey(0)
 
     @staticmethod
