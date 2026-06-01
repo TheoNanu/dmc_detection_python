@@ -20,33 +20,55 @@ def main():
         warped_bgr = results[0].get_rectified_image(frame, output_size=400)
 
         if warped_bgr is not None:
+            warp_gray = cv.cvtColor(warped_bgr, cv.COLOR_BGR2GRAY)
+
+            # CLAHE is only used to make the preview easier to read. It must NOT
+            # be fed to the grid estimator: on low-resolution / dot-peen codes it
+            # amplifies the surface grain (~3 px) into a high-frequency signal
+            # that the pitch detector locks onto instead of the true module
+            # pitch, breaking grid estimation (e.g. dmc_on_object_test_image.png:
+            # score 0.14 -> 1.0 once CLAHE is removed from the estimator input).
             clahe = cv.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
-            warped_bgr = clahe.apply(cv.cvtColor(warped_bgr, cv.COLOR_BGR2GRAY))
-            cv.imshow("2. rectified image (warped)", warped_bgr)
-
-            # warp_gray = cv.cvtColor(warped_bgr, cv.COLOR_BGR2GRAY)
-
-            warp_gray = warped_bgr
+            cv.imshow("2. rectified image (warped)", clahe.apply(warp_gray))
 
             print("\ngrid estimator test:\n")
             estimator = GridEstimator(margin=1)
+            h, w = warp_gray.shape
 
-            pitch, score = estimator.estimate_pitch(warp_gray)
+            # Primary: timing-pattern grid (sub-pixel, per-boundary module
+            # positions). Falls back to the autocorrelation pitch when the
+            # timing borders are too degraded to locate enough transitions.
+            grid = estimator.estimate_grid(warp_gray)
 
-            if pitch is not None:
-                print(f"estimated module size (pitch): {pitch:.2f} px")
-                print(f"alternation validation score: {score:.2f}")
+            data_matrix = None
+            if grid is not None:
+                col_centres, row_centres = grid
+                nx, ny = len(col_centres), len(row_centres)
+                print(f"[timing] estimated matrix size: {nx} cols x {ny} rows")
 
-                margin = estimator.margin
-                h, w = warp_gray.shape
-                w_eff = w - 2 * margin
-                h_eff = h - 2 * margin
+                bits = estimator.sample_matrix(warp_gray, col_centres, row_centres)
+                data_matrix = bits[1:-1, 1:-1]  # strip the 1-module border
 
-                nx = int(round(w_eff / pitch))
-                ny = int(round(h_eff / pitch))
+                grid_vis = warp_gray.copy()
+                estimator.draw_module_grid(grid_vis, col_centres, row_centres)
+                grid_vis = estimator.draw_module_numbers(grid_vis, col_centres, row_centres)
+                cv.imshow("final grid", grid_vis)
+            else:
+                pitch, score = estimator.estimate_pitch(warp_gray)
+                if pitch is not None:
+                    print(f"[autocorr] pitch={pitch:.2f} px score={score:.2f}")
+                    w_eff = w - 2 * estimator.margin
+                    h_eff = h - 2 * estimator.margin
+                    nx = int(round(w_eff / pitch))
+                    ny = int(round(h_eff / pitch))
+                    data_matrix = estimator.get_matrix_data(warp_gray, w / nx, h / ny, ny, nx)
+                    print(f"[autocorr] estimated matrix size: {nx} cols x {ny} rows")
+                    estimator.draw_grid(warp_gray, h / ny, w / nx)
+                    cv.imshow("final grid", warp_gray)
+                else:
+                    print("could not estimate grid")
 
-                data_matrix = estimator.get_matrix_data(warp_gray, w / nx, h / ny, ny, nx)
-                print(f"data matrix: {data_matrix}")
+            if data_matrix is not None:
                 codewords = estimator.ecc200_codewords_from_data_modules(data_matrix)
                 print(f"codewords: {codewords}")
 
@@ -61,21 +83,8 @@ def main():
                     # ignore ECC codewords / mode switches for now
 
                 print("".join(data_codewords))
-
                 print(f"data codewords: {data_codewords}")
-
-                estimator.draw_grid(warp_gray, h / ny, w / nx)
-
-                cv.imshow("final grid", warp_gray)
                 cv.waitKey(0)
-                print(f"estimated matrix size: {nx} cols x {ny} rows")
-
-                if score > 0.8:
-                    print("good score")
-                elif score < 0.6:
-                    print("poor score")
-            else:
-                print("could not estimate pitch")
 
     cv.waitKey(0)
     cv.destroyAllWindows()

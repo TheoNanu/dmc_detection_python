@@ -1,6 +1,6 @@
 import cv2 as cv
 import numpy as np
-from typing import Tuple, Optional
+from typing import Tuple, Optional, Union
 from dataclasses import dataclass
 
 from .l_finder_detector import LPattern
@@ -51,7 +51,7 @@ class DashedBorderDetector:
         vert_len = float(np.linalg.norm(vert_arm))
         tau = self.tau
         img_h, img_w = img_shape
-        depth_frac = 0.3
+        depth_frac = 0.1
 
         def strip_aabb(p_start: np.ndarray, p_end: np.ndarray,
                        inward_unit: np.ndarray, inward_depth: float) -> Tuple[int, int, int, int]:
@@ -81,8 +81,8 @@ class DashedBorderDetector:
         return (upper_region, right_region, (inward_right, inward_upper), vert_vertex,
                 (horiz_len, depth_frac * vert_len), horiz_vertex, (horiz_len * depth_frac, vert_len), v_diag)
 
-    @staticmethod
     def scan_edge_along_arms_direction(
+            self,
             edge_img: np.ndarray,
             sample_img: np.ndarray,
             u_hat: np.ndarray,
@@ -101,8 +101,21 @@ class DashedBorderDetector:
                     ])
                 for u in range(u_len)
             ])
+            scan_coords = []
+            for u in range(u_len):
+                coords = origin + u * u_hat + v * v_hat
+                row = int(round(coords[1]))
+                col = int(round(coords[0]))
+
+                row = max(0, min(row, edge_img.shape[0] - 1))
+                col = max(0, min(col, edge_img.shape[1] - 1))
+                scan_coords.append((col, row))
+
             binary = (signal > 0).astype(np.int8)
             transitions = int(np.sum(np.abs(np.diff(binary))))
+            print(f"transitions: {transitions}")
+            self.draw_sampled_border(edge_img.copy(), scan_coords, None)
+
             if transitions > best_transitions:
                 best_transitions = transitions
                 best_v = v
@@ -275,13 +288,16 @@ class DashedBorderDetector:
 
     @staticmethod
     def draw_sampled_border(edge_img: np.ndarray,
-                            upper_coords: list,
-                            right_coords: list):
+                            upper_coords: Union[list | None],
+                            right_coords: Union[list | None]):
         vis = cv.cvtColor(edge_img, cv.COLOR_GRAY2BGR)
-        for (col, row) in upper_coords:
-            vis[row, col] = (0, 0, 255)
-        for (col, row) in right_coords:
-            vis[row, col] = (0, 0, 255)
+        if upper_coords is not None:
+            for (col, row) in upper_coords:
+                vis[row, col] = (0, 0, 255)
+
+        if right_coords is not None:
+            for (col, row) in right_coords:
+                vis[row, col] = (0, 0, 255)
         cv.imshow("sampled borders", vis)
         cv.waitKey(0)
 
