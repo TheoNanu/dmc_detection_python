@@ -1,3 +1,5 @@
+import math
+
 import cv2 as cv
 import numpy as np
 from typing import List, Tuple, Optional
@@ -8,6 +10,7 @@ from dm_detector.location.l_finder_detector import LFinderDetector, LPattern
 from dm_detector.location.validator import DataMatrixValidator
 from dm_detector.location.dashed_border_detector import DashedBorderDetector
 from dm_detector.geometry.border_fitter import BorderFitter, PreciseLocation
+
 
 @dataclass
 class DetectionResult:
@@ -60,6 +63,7 @@ class DetectionResult:
 
         M = cv.getPerspectiveTransform(ordered_src, dst_pts)
         return cv.warpPerspective(full_frame, M, (output_size, output_size))
+
 
 class DataMatrixPipeline:
 
@@ -193,6 +197,36 @@ class DataMatrixPipeline:
         return results
 
     @staticmethod
+    def check_l_pattern_duplicate(current_l_pattern: LPattern, current_candidate: list,
+                                  selected: List[DetectionResult], threshold: float):
+        for s in selected:
+            v1_global = (
+                s.l_patterns[0].vertex1[0] + s.candidate_box[0], s.l_patterns[0].vertex1[1] + s.candidate_box[1])
+            v2_global = (
+                s.l_patterns[0].vertex2[0] + s.candidate_box[0], s.l_patterns[0].vertex2[1] + s.candidate_box[1])
+            corner_global = (
+                s.l_patterns[0].corner[0] + s.candidate_box[0], s.l_patterns[0].corner[1] + s.candidate_box[1])
+
+            current_v1_global = (
+                current_l_pattern.vertex1[0] + current_candidate[0],
+                current_l_pattern.vertex1[1] + current_candidate[1])
+            current_v2_global = (
+                current_l_pattern.vertex2[0] + current_candidate[0],
+                current_l_pattern.vertex2[1] + current_candidate[1])
+            current_corner_global = (
+                current_l_pattern.corner[0] + current_candidate[0], current_l_pattern.corner[1] + current_candidate[1])
+
+            v1_dist = math.sqrt((current_v1_global[0] - v1_global[0]) ** 2 + (current_v1_global[1] - v1_global[1]) ** 2)
+            v2_dist = math.sqrt((current_v2_global[0] - v2_global[0]) ** 2 + (current_v2_global[1] - v2_global[1]) ** 2)
+            corner_dist = math.sqrt(
+                (current_corner_global[0] - corner_global[0]) ** 2 + (current_corner_global[1] - corner_global[1]) ** 2)
+
+            if (v1_dist + v2_dist + corner_dist) < threshold:
+                return True
+
+        return False
+
+    @staticmethod
     def draw_results(frame: np.ndarray, results: List[DetectionResult],
                      debug_view: bool = False) -> np.ndarray:
         output = frame.copy()
@@ -218,7 +252,7 @@ class DataMatrixPipeline:
         return output
 
     @staticmethod
-    def draw_l_pattern(frame: np.ndarray, l_pattern: LPattern, color: tuple=(0, 255, 0)):
+    def draw_l_pattern(frame: np.ndarray, l_pattern: LPattern, color: tuple = (0, 255, 0)):
         result = frame.copy()
 
         cv.line(result, (int(l_pattern.vertex1[0]), int(l_pattern.vertex1[1])),
