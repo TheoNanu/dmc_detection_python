@@ -40,7 +40,7 @@ class BorderFitter:
         if self.method == self.METHOD_OUTER:
             return self._fit_outer_edges(gray_img, rough_location)
         if self.method == self.METHOD_CLEAN:
-            return self._fit_clean_linefit(gray_img, rough_location)
+            return self._fit_clean_linefit(gray_img, rough_location, dilate=30)
         return self._fit_ransac(edge_img, rough_location)
 
     @staticmethod
@@ -93,6 +93,7 @@ class BorderFitter:
         thr, _ = cv.threshold(interior.reshape(-1, 1), 0, 255,
                               cv.THRESH_BINARY + cv.THRESH_OTSU)
         _, bw = cv.threshold(blurred, thr, 255, cv.THRESH_BINARY_INV)
+        cv.imshow("quad mask", quad_mask)
         cv.imshow("bw", bw)
 
         # 2. mask away everything outside the quad
@@ -117,7 +118,7 @@ class BorderFitter:
             if np.dot(perp, (p_start + p_end) / 2 - center) < 0:
                 perp = -perp  # outward normal
 
-            pts = self._scan_boundary_inward(cleaned, p_start, p_end, perp)
+            pts = self._scan_boundary_inward(cleaned, p_start, p_end, perp, win_out=20.0)
             if len(pts) < 2:
                 return None
             line = self._ransac_line_outer(
@@ -148,7 +149,7 @@ class BorderFitter:
         """Show the cleaned DMC with each side's boundary points, the fitted
         outer-tangent lines, and the resulting quad (upscaled for visibility)."""
         vis = cv.cvtColor(cleaned, cv.COLOR_GRAY2BGR)
-        colors = [(0, 0, 255), (0, 255, 255), (255, 0, 0), (0, 255, 0)]  # side 0..3
+        colors = [(0, 0, 255), (0, 140, 255), (255, 0, 0), (0, 255, 0)]  # side 0..3
         diag = float(np.hypot(*cleaned.shape[:2]))
 
         for (normal, c), pts, col in zip(lines, all_pts, colors):
@@ -159,6 +160,7 @@ class BorderFitter:
             p0 = -c * normal                          # a point on the line (unit normal)
             pa = (p0 - d * diag).astype(int)
             pb = (p0 + d * diag).astype(int)
+            print(f"[border-fitter] {pts.shape[0]} points for side with color: {col}")
             cv.line(vis, tuple(pa), tuple(pb), col, 1)
 
         quad = np.array([[int(round(p[0])), int(round(p[1]))] for p in corners], dtype=np.int32)
@@ -171,6 +173,10 @@ class BorderFitter:
             vis = cv.resize(vis, None, fx=scale, fy=scale, interpolation=cv.INTER_NEAREST)
         cv.imshow(window, vis)
         cv.waitKey(0)
+
+    def _show_selected_points(self, cleaned: np.ndarray, pts: np.ndarray):
+        pass
+
 
     @staticmethod
     def _scan_boundary_inward(cleaned: np.ndarray, p_start: np.ndarray, p_end: np.ndarray,

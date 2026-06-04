@@ -135,7 +135,7 @@ class DashedBorderDetector:
             edge_row = np.append(edge_row, sample_img[row, col])
             sampled_coords.append((col, row))
 
-        return most_edges_row, edge_row, sampled_coords
+        return most_edges_row, edge_row, sampled_coords, best_transitions
 
     @staticmethod
     def find_outer_border_line(
@@ -241,17 +241,17 @@ class DashedBorderDetector:
         cv.waitKey(0)
 
 
-        upper_dashed_row, extracted_arr_upper, upper_coords = self.scan_edge_along_arms_direction(edges, gray_img, inward_right_unit * -1,
+        upper_dashed_row, extracted_arr_upper, upper_coords, t_upper = self.scan_edge_along_arms_direction(edges, gray_img, inward_right_unit * -1,
                                                                                     inward_upper_unit, vert_vertex,
                                                                                     int(border_len_upper), int(upper_inward))
-        right_dashed_col, extracted_arr_right, right_coords = self.scan_edge_along_arms_direction(edges, gray_img, inward_upper_unit * -1,
+        right_dashed_col, extracted_arr_right, right_coords, t_right = self.scan_edge_along_arms_direction(edges, gray_img, inward_upper_unit * -1,
                                                                                     inward_right_unit, horiz_vertex,
                                                                                     int(border_len_right), int(right_inward))
 
         self.draw_sampled_border(edges, upper_coords, right_coords)
 
-        t_upper = self.count_transitions(extracted_arr_upper)
-        t_right = self.count_transitions(extracted_arr_right)
+        # t_upper = self.count_transitions(extracted_arr_upper)
+        # t_right = self.count_transitions(extracted_arr_right)
 
         if t_upper < self.min_transitions or t_right < self.min_transitions:
             print(f"[dashed] rejected: upper_transitions={t_upper}, right_transitions={t_right}, min={self.min_transitions}")
