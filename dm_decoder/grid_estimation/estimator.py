@@ -1,9 +1,12 @@
 import cv2 as cv
 import numpy as np
 from typing import Tuple, Optional
+import matplotlib.pyplot as plt
 
 
 class GridEstimator:
+    valid_size = [10, 12, 14, 16, 18, 20, 22, 24, 26, 32, 40, 44, 48, 52, 64, 72, 80, 88, 96, 104, 120, 132, 144]
+
     def __init__(self,
                  band_thickness: int = 11,
                  margin: int = 5,
@@ -65,8 +68,9 @@ class GridEstimator:
         timing borders are too degraded to locate enough boundaries."""
         h, w = warp_gray.shape[:2]
 
-        col_bounds = self._timing_boundaries(warp_gray, axis="x", off=off)
-        row_bounds = self._timing_boundaries(warp_gray, axis="y", off=off)
+        col_bounds, raw_col_bounds = self._timing_boundaries(warp_gray, axis="x", off=off)
+        row_bounds, raw_row_bounds = self._timing_boundaries(warp_gray, axis="y", off=off)
+        print(f"[estimate-grid] col bounds: {col_bounds} raw col bounds: {raw_col_bounds} row bounds: {row_bounds} raw row bounds: {raw_row_bounds}")
         if col_bounds is None or row_bounds is None:
             return None
 
@@ -74,7 +78,7 @@ class GridEstimator:
                 self._boundaries_to_centres(row_bounds))
 
     def _timing_boundaries(self, img: np.ndarray, axis: str, off: int = 4
-                           ) -> Optional[np.ndarray]:
+                           ) -> Optional[Tuple[np.ndarray, np.ndarray]]:
         h, w = img.shape[:2]
         if axis == "x":  # top border -> column boundaries, profile along x
             band = img[off:off + self.k, self.margin:w - self.margin]
@@ -83,8 +87,35 @@ class GridEstimator:
             band = img[self.margin:h - self.margin, w - off - self.k:w - off]
             prof = np.median(band.astype(np.float32), axis=1)
 
-        cr, pol = self._subpixel_transitions(prof)
-        cr, pol = self._reject_spurious(cr, pol)
+        cv.imshow(f"band {axis}", cv.resize(band, dsize=None, fx=2.0, fy=2.0, interpolation=cv.INTER_NEAREST))
+        cv.waitKey(0)
+        cv.imwrite(f"band{axis}.png", band)
+        print(f"Profile: {prof}")
+        hp1, cr, pol, raw_cr = self._subpixel_transitions(prof, amp_window=5)
+        print(f"[estimator] Initial number of transitions found: {cr.shape[0]}")
+
+        # x = np.arange(0, hp1.shape[0])
+        # fig, axs = plt.subplots(2, 1)
+        # h, w = band.shape[:2]
+        # if h > w:
+        #     band_plt = band.T
+        # else:
+        #     band_plt = band
+        # axs[0].imshow(cv.cvtColor(band_plt, cv.COLOR_GRAY2BGR))
+        # axs[1].plot(x, hp1)
+        # axs[1].set_xlim(0, x.shape[0])
+        #
+        # for c, r in zip(cr, raw_cr):
+        #     axs[1].axvline(x=c, color="red", linestyle="--", linewidth=1.5)
+        #     axs[1].axvline(x=r, color="green", linestyle="--", linewidth=1.5)
+        #
+        # axs[1].axhline(y=0, color="grey", linestyle="--", linewidth=1.5)
+        # plt.show()
+
+        cr, pol, raw_cr = self._reject_spurious(cr, pol, raw_cr)
+        print(f"[estimator] Number of transitions after first filter: {cr.shape[0]}")
+        print(f"[estimator] Transitions: {cr}")
+        print(f"[estimator] Polarities: {pol}")
 
         # Terminal-polarity constraint. The timing pattern's corner modules fix
         # the colour change at each end, so the first and last *real* transition
@@ -100,16 +131,41 @@ class GridEstimator:
         while hi - lo > 2 and pol[hi - 1] != required:
             hi -= 1
         cr = cr[lo:hi]
+        raw_cr = raw_cr[lo:hi]
+        print(f"[estimator] lo: {lo} hi: {hi}")
+        print(f"[estimator] Transitions: {cr}")
 
-        cr = self._regularize_transitions(cr)
+        print(f"[estimator] Number of transitions after polarity filter: {cr.shape[0]}")
+
+        cr, raw_cr = self._regularize_transitions(cr, raw_cr)
+
+        print(f"[estimator] Number of transitions after second filter: {cr.shape[0]}")
+
+        x = np.arange(0, hp1.shape[0])
+        fig, axs = plt.subplots(2, 1)
+        h, w = band.shape[:2]
+        if h > w:
+            band_plt = band.T
+        else:
+            band_plt = band
+        axs[0].imshow(cv.cvtColor(band_plt, cv.COLOR_GRAY2BGR))
+        axs[1].plot(x, hp1)
+        axs[1].set_xlim(0, x.shape[0])
+
+        for c, r in zip(cr, raw_cr):
+            axs[1].axvline(x=c, color="red", linestyle="--", linewidth=1.5)
+            axs[1].axvline(x=r, color="green", linestyle="--", linewidth=1.5)
+
+        axs[1].axhline(y=0, color="grey", linestyle="--", linewidth=1.5)
+        plt.show()
 
         if len(cr) < 6:  # need a handful of modules for a meaningful grid
-            return None
-        return cr + self.margin
+            return None, None
+        return cr + self.margin, raw_cr + self.margin
 
     @staticmethod
-    def _regularize_transitions(cr: np.ndarray, lo_frac: float = 0.7,
-                                sum_tol_frac: float = 0.4) -> np.ndarray:
+    def _regularize_transitions(cr: np.ndarray, raw_cr: np.ndarray, lo_frac: float = 0.7,
+                                sum_tol_frac: float = 0.4) -> Tuple[np.ndarray, np.ndarray]:
         """Repair module-split artifacts locally.
 
         A surface blob/noise in the timing band can leave a transition stuck
@@ -120,6 +176,7 @@ class GridEstimator:
         variance of dot-peen codes without the drift of a fixed global grid.
         Clean codes are untouched (no sub-pitch gap pairs exist)."""
         cr = np.asarray(cr, dtype=float)
+        raw_cr = np.asarray(raw_cr)
         changed = True
         while changed and len(cr) > 3:
             changed = False
@@ -134,17 +191,29 @@ class GridEstimator:
                 if (gaps[i] < lo_frac * pitch and gaps[i + 1] < lo_frac * pitch
                         and abs(gaps[i] + gaps[i + 1] - pitch) < sum_tol_frac * pitch):
                     cr = np.delete(cr, i + 1)  # drop the mid-module transition
+                    raw_cr = np.delete(raw_cr, i + 1)
+                    print(f"[estimator] regularize transitions deleted transition at: {i + 1}")
                     changed = True
                     break
-        return cr
+        return cr, raw_cr
 
     @staticmethod
-    def _subpixel_transitions(prof: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+    def _subpixel_transitions(prof: np.ndarray,
+                              min_amplitude: float = 0.3,
+                              amp_window: int = 3) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
         """Sub-pixel zero-crossings of the high-passed border profile/DoG style filtered border profile, zero-crossings
         represent edges in the original border profile — one per
         module boundary in an alternating timing pattern. Returns (positions,
         polarities) where polarity is +1 for a black->white edge (profile rising)
-        and -1 for white->black (profile falling)."""
+        and -1 for white->black (profile falling).
+
+        A crossing is only accepted if the band swings to at least
+        ``min_amplitude`` (in std units, since the band is normalized) within
+        ``amp_window`` samples on *both* sides — a real module boundary produces
+        ~±1.5 std lobes around its zero-crossing, while ripples in the flat
+        quiet zone stay well below 0.1 std and would otherwise be picked up as
+        transitions (and the first of them could never be removed by
+        _reject_spurious, which always keeps the earliest crossing)."""
         prof = prof.astype(np.float32)
         prof = prof - prof.mean()
         trend = cv.GaussianBlur(prof.reshape(1, -1), (0, 0), sigmaX=9,
@@ -159,36 +228,49 @@ class GridEstimator:
         if s > 1e-6:
             hp = hp / s
 
-        cr, pol = [], []
+        cr, pol, raw_cr = [], [], []
+
+        print(f"High-pass filter: {hp}")
         for i in range(len(hp) - 1):
             # zero-crossings are found where there is a sign difference between 2 adjacent samples in the high-pass band
             # a zero-value in the current position can be a sign of a zero-crossing but also a sign of a flat surface
             # so the hp[i] != 0 tries to get rid of that ambiguity
             if hp[i] != 0 and hp[i] * hp[i + 1] < 0:
+                # amplitude gate: require a real swing on both sides of the
+                # crossing, not just a sign flip in near-zero noise
+                left_peak = np.max(np.abs(hp[max(0, i - amp_window):i + 1]))
+                right_peak = np.max(np.abs(hp[i + 1:i + 2 + amp_window]))
+                print(f"[estimator] zero-crossing found at: {i}-{i+1} with amplitude: {left_peak}x{right_peak}")
+                if min(left_peak, right_peak) < min_amplitude:
+                    print(f"[estimator] Not passing the min amplitude gate")
+                    continue
                 # linear interpolation of the zero-crossing
                 frac = abs(hp[i]) / (abs(hp[i]) + abs(hp[i + 1]))
                 # store the sub-pixel position of the zero-crossing as the position where a sign difference has been
                 # found + the interpolated fraction of the zero-crossing from the current position
                 cr.append(i + frac)
+                raw_cr.append(i)
                 # hp[i] > 0 means profile falls through zero: white -> black.
                 pol.append(-1 if hp[i] > 0 else +1)
-        return np.array(cr), np.array(pol, dtype=int)
+        return hp, np.array(cr), np.array(pol, dtype=int), np.array(raw_cr)
 
     @staticmethod
-    def _reject_spurious(cr: np.ndarray, pol: np.ndarray,
-                         min_frac: float = 0.5) -> Tuple[np.ndarray, np.ndarray]:
+    def _reject_spurious(cr: np.ndarray, pol: np.ndarray, raw_cr: np.ndarray,
+                         min_frac: float = 0.5) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
         """Drop transitions closer than ``min_frac`` of the median spacing to
         their predecessor — these are noise crossings, not module boundaries."""
         if len(cr) < 3:
-            return cr, pol
+            return cr, pol, raw_cr
         spacing = float(np.median(np.diff(cr)))
         if spacing <= 0:
-            return cr, pol
+            return cr, pol, raw_cr
         keep_idx = [0]
         for i in range(1, len(cr)):
             if cr[i] - cr[keep_idx[-1]] >= min_frac * spacing:
                 keep_idx.append(i)
-        return cr[keep_idx], pol[keep_idx]
+
+        print(f"[estimator] reject spurious transitions kept: {keep_idx}")
+        return cr[keep_idx], pol[keep_idx], raw_cr[keep_idx]
 
     @staticmethod
     def _boundaries_to_centres(b: np.ndarray) -> np.ndarray:

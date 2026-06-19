@@ -4,6 +4,7 @@ import numpy as np
 from typing import List, Tuple, Optional
 from dataclasses import dataclass
 
+from debug import DebugSink, NullSink
 from dm_detector.location.l_finder_detector import LPattern
 from dm_detector.location.dashed_border_detector import DataMatrixLocation
 
@@ -24,14 +25,17 @@ class BorderFitter:
     METHOD_OUTER = "outer"
     METHOD_CLEAN = "clean"
 
-    def __init__(self, method: str = METHOD_CLEAN):
+    def __init__(self, method: str = METHOD_CLEAN, debug: DebugSink = NullSink()):
         if method not in (self.METHOD_EXTENT, self.METHOD_RANSAC,
                           self.METHOD_OUTER, self.METHOD_CLEAN):
             raise ValueError(f"Unknown border-fitter method: {method!r}")
         self.method = method
+        self.debug = debug
 
     def fit(self, gray_img: np.ndarray, edge_img: np.ndarray, l_pattern: LPattern,
-            rough_location: Optional[DataMatrixLocation] = None) -> Optional[PreciseLocation]:
+            rough_location: Optional[DataMatrixLocation] = None, gaussian_size: int = 3, dilate_size: int = 5,
+            blob_min_area: int = 0, win_in: int = 20, win_out: int = 20, max_pts_outside: int = 3,
+            inlier_threshold: float = 1.2) -> Optional[PreciseLocation]:
         if rough_location is None:
             return self._fit_from_l_pattern(l_pattern)
 
@@ -40,7 +44,9 @@ class BorderFitter:
         if self.method == self.METHOD_OUTER:
             return self._fit_outer_edges(gray_img, rough_location)
         if self.method == self.METHOD_CLEAN:
-            return self._fit_clean_linefit(gray_img, rough_location, dilate=30)
+            return self._fit_clean_linefit(gray_img, rough_location, dilate=dilate_size, gaussian_size=gaussian_size,
+                                           blob_min_area=blob_min_area, win_in=win_in, win_out=win_out,
+                                           max_outside=max_pts_outside, inlier_threshold=inlier_threshold)
         return self._fit_ransac(edge_img, rough_location)
 
     @staticmethod
@@ -62,7 +68,13 @@ class BorderFitter:
     def _fit_clean_linefit(self, gray_img: np.ndarray,
                            rough_location: DataMatrixLocation,
                            dilate: int = 5,
-                           ransac_iterations: int = 1500) -> Optional[PreciseLocation]:
+                           ransac_iterations: int = 1500,
+                           blob_min_area: int = 0,
+                           gaussian_size: int = 5,
+                           win_in: int = 20,
+                           win_out: int = 20,
+                           max_outside: int = 10,
+                           inlier_threshold: float = 1.2) -> Optional[PreciseLocation]:
         """Quad-guided noise removal, then fit one *outer-tangent* line per side
         and intersect.
 
@@ -86,23 +98,51 @@ class BorderFitter:
         #    the DMC) the apparent border and pushes the fitted corners outward.
         #    Estimating the threshold from the DMC's own bimodal pixels adapts
         #    per image with no hardcoded value.
-        blurred = cv.GaussianBlur(gray_img, (3, 3), 0)
+        blurred = cv.GaussianBlur(gray_img, (gaussian_size, gaussian_size), 0)
+        # blurred = cv.medianBlur(gray_img, 5)
         quad_mask = np.zeros(blurred.shape[:2], dtype=np.uint8)
         cv.fillConvexPoly(quad_mask, quad.astype(np.int32), 255)
         interior = blurred[quad_mask > 0]
         thr, _ = cv.threshold(interior.reshape(-1, 1), 0, 255,
                               cv.THRESH_BINARY + cv.THRESH_OTSU)
         _, bw = cv.threshold(blurred, thr, 255, cv.THRESH_BINARY_INV)
-        cv.imshow("quad mask", quad_mask)
-        cv.imshow("bw", bw)
+        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (1, 1))
+        clean = cv2.morphologyEx(bw, cv2.MORPH_OPEN, kernel)
+
+        num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(clean, connectivity=8)
+
+        min_area = blob_min_area
+        filtered = np.zeros_like(clean)
+
+        for i in range(1, num_labels):
+            if stats[i, cv2.CC_STAT_AREA] >= min_area:
+                filtered[labels == i] = 255
+
+        need_rs = False
+
+        if quad_mask.shape[0] < 700 or quad_mask.shape[1] < 700:
+            need_rs = True
+
+        self.debug.show("quad mask", cv.resize(quad_mask, dsize=None, fx=2.0, fy=2.0, interpolation=cv.INTER_AREA) if need_rs else quad_mask)
+        self.debug.show("bw", cv.resize(bw, dsize=None, fx=2.0, fy=2.0, interpolation=cv.INTER_AREA) if need_rs else bw)
+        self.debug.show("clean", cv.resize(clean, dsize=None, fx=2.0, fy=2.0, interpolation=cv.INTER_AREA) if need_rs else clean)
+        self.debug.show("filtered", cv.resize(filtered, dsize=None, fx=2.0, fy=2.0, interpolation=cv.INTER_AREA) if need_rs else filtered)
+
+        # cv.imshow("quad mask", cv.resize(quad_mask, dsize=None, fx=2.0, fy=2.0, interpolation=cv.INTER_AREA) if need_rs else quad_mask)
+        # cv.imshow("bw", cv.resize(bw, dsize=None, fx=2.0, fy=2.0, interpolation=cv.INTER_AREA) if need_rs else bw)
+        # cv.imshow("clean", cv.resize(clean, dsize=None, fx=2.0, fy=2.0, interpolation=cv.INTER_AREA) if need_rs else clean)
+        # cv.imshow("filtered", cv.resize(filtered, dsize=None, fx=2.0, fy=2.0, interpolation=cv.INTER_AREA) if need_rs else filtered)
 
         # 2. mask away everything outside the quad
         mask = cv.dilate(quad_mask, cv.getStructuringElement(cv.MORPH_ELLIPSE, (dilate, dilate)))
-        cleaned = cv.bitwise_and(bw, mask)
+        cleaned = cv.bitwise_and(filtered, mask)
         cleaned = cv.morphologyEx(cleaned, cv.MORPH_OPEN, np.ones((2, 2), np.uint8))
 
-        cv.imshow("cleaned", cleaned)
-        cv.waitKey(0)
+        self.debug.show("cleaned", cv.resize(cleaned, dsize=None, fx=2.0, fy=2.0, interpolation=cv.INTER_AREA) if need_rs else cleaned)
+        self.debug.pause()
+
+        # cv.imshow("cleaned", cv.resize(cleaned, dsize=None, fx=2.0, fy=2.0, interpolation=cv.INTER_AREA) if need_rs else cleaned)
+        # cv.waitKey(0)
 
         # 3. fit an outer-tangent line per side
         lines = []
@@ -118,12 +158,16 @@ class BorderFitter:
             if np.dot(perp, (p_start + p_end) / 2 - center) < 0:
                 perp = -perp  # outward normal
 
-            pts = self._scan_boundary_inward(cleaned, p_start, p_end, perp, win_out=20.0)
+            pts = self._scan_boundary_inward(cleaned, p_start, p_end, perp, win_in=win_in, win_out=win_out)
             if len(pts) < 2:
                 return None
+            self._show_sampled_points(cleaned, pts, color=(255, 0, 0), need_resize=need_rs)
             line = self._ransac_line_outer(
-                pts, perp, direction, max_iterations=ransac_iterations
+                pts, perp, direction, max_iterations=ransac_iterations, max_outside=max_outside, inlier_threshold=inlier_threshold
             )
+
+            self.debug.log(f"[border-fitter] Line: {line}")
+
             if line is None:
                 return None
             lines.append(line)
@@ -134,18 +178,38 @@ class BorderFitter:
         horiz = self._intersect_lines(lines[0], lines[1])
         v_diag = self._intersect_lines(lines[1], lines[2])
         vert = self._intersect_lines(lines[2], lines[3])
+
+        self.debug.log(f"[border-fitter] Corners: {corner}, {horiz}, {v_diag}, {vert}")
+
         if any(v is None for v in (corner, horiz, v_diag, vert)):
             return None
 
-        self._show_fitted_lines(cleaned, lines, all_pts, [corner, horiz, v_diag, vert])
+        self._show_fitted_lines(cleaned, lines, all_pts, [corner, horiz, v_diag, vert], need_resize=need_rs)
 
         return self._build_precise_location(
             [(float(p[0]), float(p[1])) for p in (corner, horiz, v_diag, vert)]
         )
 
     @staticmethod
+    def _show_sampled_points(cleaned: np.ndarray, pts: np.ndarray, window: str = "sampled points",
+                             color: tuple = (0, 0, 255), need_resize: bool = False):
+        vis = cv.cvtColor(cleaned, cv.COLOR_GRAY2BGR)
+
+        for p in pts:
+            cv.circle(vis, (int(round(p[0])), int(round(p[1]))), 1, color, -1)
+
+        scale = max(1, int(round(600.0 / max(cleaned.shape[:2]))))
+        if scale > 1:
+            vis = cv.resize(vis, None, fx=scale, fy=scale, interpolation=cv.INTER_NEAREST)
+
+        if need_resize:
+            vis = cv.resize(vis, None, fx=2.0, fy=2.0, interpolation=cv.INTER_NEAREST)
+        cv.imshow(window, vis)
+        cv.waitKey(0)
+
+    @staticmethod
     def _show_fitted_lines(cleaned: np.ndarray, lines: list, all_pts: list,
-                           corners: list, window: str = "border fit") -> None:
+                           corners: list, window: str = "border fit", need_resize: bool = False) -> None:
         """Show the cleaned DMC with each side's boundary points, the fitted
         outer-tangent lines, and the resulting quad (upscaled for visibility)."""
         vis = cv.cvtColor(cleaned, cv.COLOR_GRAY2BGR)
@@ -171,6 +235,9 @@ class BorderFitter:
         scale = max(1, int(round(600.0 / max(cleaned.shape[:2]))))
         if scale > 1:
             vis = cv.resize(vis, None, fx=scale, fy=scale, interpolation=cv.INTER_NEAREST)
+
+        if need_resize:
+            vis = cv.resize(vis, None, fx=2.0, fy=2.0, interpolation=cv.INTER_NEAREST)
         cv.imshow(window, vis)
         cv.waitKey(0)
 
