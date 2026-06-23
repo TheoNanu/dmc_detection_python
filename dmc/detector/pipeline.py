@@ -2,14 +2,15 @@ import cv2 as cv
 import numpy as np
 from typing import List
 
-from config import DetectorConfig
-from data import DetectionResult
-from debug import DebugSink, NullSink
-from dm_detector.extraction.candidate_extraction import CandidateExtraction
-from dm_detector.location.l_finder_detector import LFinderDetector, LPattern
-from dm_detector.location.validator import DataMatrixValidator
-from dm_detector.location.dashed_border_detector import DashedBorderDetector
-from dm_detector.geometry.border_fitter import BorderFitter, PreciseLocation
+from dmc.config import DetectorConfig
+from dmc.data import DetectionResult
+from dmc.debug import DebugSink, NullSink
+from dmc.detector.extraction.candidate_extraction import CandidateExtraction
+from dmc.detector.location.l_finder_detector import LFinderDetector, LPattern
+from dmc.detector.location.validator import DataMatrixValidator
+from dmc.detector.location.dashed_border_detector import DashedBorderDetector
+from dmc.detector.geometry.border_fitter import BorderFitter, PreciseLocation
+from dmc.viz import show_pattern
 
 
 class DetectionPipeline:
@@ -64,17 +65,13 @@ class DetectionPipeline:
         return False
 
     def run(self, frame: np.ndarray):
-        return self.process_frame(frame,
-                           smoothing=self.detector_config.smoothing,
-                           noisy_surface=self.detector_config.noisy_surface,
-                           canny_percentile=self.detector_config.canny_percentile,
-                           border_fitter_gaussian_size=self.detector_config.border_fitter_config.gaussian_size,
-                           fitter_dilate_size=self.detector_config.border_fitter_config.dilate_size,
-                           fitter_blob_removal_min_area=self.detector_config.border_fitter_config.blob_min_area,
-                           fitter_win_in=self.detector_config.border_fitter_config.win_in,
-                           fitter_win_out=self.detector_config.border_fitter_config.win_out,
-                           fitter_ransac_max_pts_outside=self.detector_config.border_fitter_config.ransac_max_pts_outside,
-                           fitter_ransac_inlier_threshold_dist=self.detector_config.border_fitter_config.ransac_inlier_threshold)
+        if not isinstance(frame, np.ndarray):
+            raise ValueError("Input image should be a numpy array")
+
+        if len(frame.shape) != 3:
+            raise ValueError("Input image should have 3 channels")
+
+        return self.process_frame(frame, self.detector_config)
 
     def detect(self, frame: np.ndarray, smoothing: int = 11, noisy_surface=False, canny_percentile: float=90.0,
                border_fitter_gaussian_size: int = 3, fitter_dilate_size: int = 5, fitter_blob_removal_min_area: int = 0,
@@ -185,17 +182,7 @@ class DetectionPipeline:
         # cv.waitKey(0)
         # return  detection_results
 
-    def process_frame(self, frame: np.ndarray,
-                      smoothing: int = 11,
-                      noisy_surface=False,
-                      canny_percentile: float=90.0,
-                      border_fitter_gaussian_size: int = 3,
-                      fitter_dilate_size: int = 5,
-                      fitter_blob_removal_min_area: int = 0,
-                      fitter_win_in: int = 20,
-                      fitter_win_out: int = 20,
-                      fitter_ransac_max_pts_outside: int = 3,
-                      fitter_ransac_inlier_threshold_dist: float = 1.2) -> List[DetectionResult]:
+    def process_frame(self, frame: np.ndarray, detector_config: DetectorConfig) -> List[DetectionResult]:
         gray = cv.cvtColor(frame, cv.COLOR_BGR2GRAY)
         candidates = self.extractor.get_candidates(frame)
         results = []
@@ -211,21 +198,16 @@ class DetectionPipeline:
             self.debug.show("region", region)
             self.debug.pause()
 
-            # cv.imshow("region", region)
-            # cv.waitKey(0)
 
             if self.parent_visited(visited_candidates, (x, y, x + w, y + h)):
-                # print(f"[pipeline] region ({x},{y},{w},{h}) skipped: parent already visited")
                 continue
 
             visited_candidates.append((x, y, x + w, y + h))
-            # print(f"[pipeline] processing region ({x},{y},{w},{h})")
 
-            segments = self.l_finder.detect_lines(cv.medianBlur(region, smoothing), multiscale=noisy_surface, scales=(0.5, 0.25),
-                                                  apply_line_merging=noisy_surface)
+            segments = self.l_finder.detect_lines(cv.medianBlur(region, detector_config.smoothing),
+                                                  multiscale=detector_config.noisy_surface, scales=(0.5, 0.25),
+                                                  apply_line_merging=detector_config.noisy_surface)
             l_patterns = self.l_finder.find_l_patterns(cv.cvtColor(region, cv.COLOR_GRAY2BGR), region, segments)
-
-            # print(f"[pipeline] l_patterns found: {len(l_patterns)}")
 
             region_has_valid = False
 
@@ -237,7 +219,7 @@ class DetectionPipeline:
                 validation = self.validator.validate(region, l_pattern)
 
                 label = f"#{idx} VALIDATOR {'ACCEPT' if validation.is_valid else 'REJECT'}: {validation.reason}"
-                self.l_finder._show_pattern(
+                show_pattern(
                     cv.cvtColor(region, cv.COLOR_GRAY2BGR),
                     l_pattern, label, validation.is_valid, window="detected"
                 )
@@ -246,9 +228,10 @@ class DetectionPipeline:
                     continue
 
                 dashed_result, edges = self.dashed_detector.detect(region, l_pattern, scan_method="legacy",
-                                                                   smoothing=smoothing, canny_percentile=canny_percentile)
+                                                                   smoothing=detector_config.smoothing,
+                                                                   canny_percentile=detector_config.canny_percentile)
                 dashed_label = f"#{idx} DASHED {'ACCEPT' if dashed_result is not None else 'REJECT'}"
-                self.l_finder._show_pattern(
+                show_pattern(
                     cv.cvtColor(region, cv.COLOR_GRAY2BGR),
                     l_pattern, dashed_label, dashed_result is not None, window="detected"
                 )
@@ -258,13 +241,13 @@ class DetectionPipeline:
 
                 precise_location = self.border_fitter.fit(region, edges, l_pattern,
                                                           rough_location=dashed_result,
-                                                          gaussian_size=border_fitter_gaussian_size,
-                                                          dilate_size=fitter_dilate_size,
-                                                          blob_min_area=fitter_blob_removal_min_area,
-                                                          win_in=fitter_win_in,
-                                                          win_out=fitter_win_out,
-                                                          max_pts_outside=fitter_ransac_max_pts_outside,
-                                                          inlier_threshold=fitter_ransac_inlier_threshold_dist)
+                                                          gaussian_size=detector_config.border_fitter_config.gaussian_size,
+                                                          dilate_size=detector_config.border_fitter_config.dilate_size,
+                                                          blob_min_area=detector_config.border_fitter_config.blob_min_area,
+                                                          win_in=detector_config.border_fitter_config.win_in,
+                                                          win_out=detector_config.border_fitter_config.win_out,
+                                                          max_pts_outside=detector_config.border_fitter_config.ransac_max_pts_outside,
+                                                          inlier_threshold=detector_config.border_fitter_config.ransac_inlier_threshold)
 
                 if precise_location is None:
                     self.debug.log(f"[pipeline] precise location not found")
@@ -413,58 +396,3 @@ class DetectionPipeline:
         if shorter < 1e-9:
             return False
         return overlap / shorter >= min_overlap_ratio
-
-    @staticmethod
-    def draw_results(frame: np.ndarray, results: List[DetectionResult],
-                     debug_view: bool = False) -> np.ndarray:
-        output = frame.copy()
-
-        for result in results:
-            x, y, w, h = result.candidate_box
-
-            if result.precise_location and result.is_valid:
-                print("DMC DETECTED")
-                vertices = result.precise_location.ordered_vertices()
-                pts = np.array(vertices, dtype=np.int32)
-                cv.polylines(output, [pts], True, (0, 255, 0), 2)
-
-                if debug_view:
-                    print("DMC DETECTED, DRAWING CANDIDATE")
-                    cx, cy = int(result.precise_location.center[0]), int(result.precise_location.center[1])
-                    cv.circle(output, (cx, cy), 10, (255, 0, 0), -1)
-
-            elif debug_view:
-                print("DMC NOT DETECTED BUT DRAWING CANDIDATE")
-                # cv.rectangle(output, (x, y), (x + w, y + h), (0, 0, 255), 1)
-
-        return output
-
-    def draw_dmc(self, frame: np.ndarray, location: PreciseLocation, decoded_text: str = ""):
-        output = frame.copy()
-
-        vertices = location.get_ordered_vertices()
-        pts = np.array(vertices, dtype=np.int32)
-        cv.polylines(output, [pts], True, (0, 255, 0), 2)
-
-        cx, cy = int(location.center[0]), int(location.center[1])
-
-        text_size = cv.getTextSize(decoded_text, cv.FONT_HERSHEY_SIMPLEX, 1, 2)
-
-        print(text_size)
-
-        cv.putText(output, decoded_text,
-                   (int(cx - (text_size[0][0] / 2)), int(cy - (text_size[0][1] / 2))),
-                   cv.FONT_HERSHEY_SIMPLEX, 1, (54, 54, 173), 2)
-
-        return output
-
-    @staticmethod
-    def draw_l_pattern(frame: np.ndarray, l_pattern: LPattern, color: tuple = (0, 255, 0)):
-        result = frame.copy()
-
-        cv.line(result, (int(l_pattern.vertex1[0]), int(l_pattern.vertex1[1])),
-                (int(l_pattern.corner[0]), int(l_pattern.corner[1])), color, 3)
-        cv.line(result, (int(l_pattern.vertex2[0]), int(l_pattern.vertex2[1])),
-                (int(l_pattern.corner[0]), int(l_pattern.corner[1])), color, 3)
-
-        return result

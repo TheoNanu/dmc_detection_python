@@ -4,6 +4,22 @@ from typing import Tuple, Optional, List
 import cv2 as cv
 import numpy as np
 
+
+@dataclass
+class LineSegment:
+    p1: Tuple[float, float]
+    p2: Tuple[float, float]
+    marked: bool = False
+
+    @property
+    def length(self) -> float:
+        return np.sqrt((self.p2[0] - self.p1[0]) ** 2 + (self.p2[1] - self.p1[1]) ** 2)
+
+    @property
+    def angle(self) -> float:
+        return np.arctan2(self.p2[1] - self.p1[1], self.p2[0] - self.p1[0])
+
+
 @dataclass
 class ValidationResult:
     is_valid: bool
@@ -11,6 +27,7 @@ class ValidationResult:
     aspect_ratio: float
     score: float
     reason: str = ""
+
 
 @dataclass
 class PreciseLocation:
@@ -47,6 +64,17 @@ class LPattern:
         x_min, x_max = int(min(xs)), int(max(xs))
         y_min, y_max = int(min(ys)), int(max(ys))
         return x, y, w, h
+
+
+@dataclass
+class DataMatrixLocation:
+    l_pattern: LPattern
+    upper_border: Tuple[int, int, int, int]
+    right_border: Tuple[int, int, int, int]
+    bounding_box: Tuple[int, int, int, int]
+    quads: Tuple[Tuple[int, int], Tuple[int, int], Tuple[int, int], Tuple[int, int]]
+    upper_outer_coords: list
+    right_outer_coords: list
 
 
 @dataclass

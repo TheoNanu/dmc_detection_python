@@ -1,10 +1,10 @@
-from typing import List, Tuple, Optional, Union
+from typing import List, Tuple, Optional
 
 import numpy as np
 import cv2 as cv
 
-from data import PreciseLocation, LPattern, DetectionResult
-from debug import DebugSink, NullSink
+from dmc.data import PreciseLocation, LPattern, DetectionResult, LineSegment, DataMatrixLocation
+from dmc.debug import DebugSink, NullSink
 
 
 def draw_dmc(frame: np.ndarray, location: PreciseLocation, decoded_text: str = ""):
@@ -17,8 +17,6 @@ def draw_dmc(frame: np.ndarray, location: PreciseLocation, decoded_text: str = "
     cx, cy = int(location.center[0]), int(location.center[1])
 
     text_size = cv.getTextSize(decoded_text, cv.FONT_HERSHEY_SIMPLEX, 1, 2)
-
-    print(text_size)
 
     cv.putText(output, decoded_text,
                (int(cx - (text_size[0][0] / 2)), int(cy - (text_size[0][1] / 2))),
@@ -33,7 +31,45 @@ def draw_l_pattern(frame: np.ndarray, l_pattern: LPattern, color: tuple = (0, 25
             (int(l_pattern.corner[0]), int(l_pattern.corner[1])), color, 3)
     cv.line(result, (int(l_pattern.vertex2[0]), int(l_pattern.vertex2[1])),
             (int(l_pattern.corner[0]), int(l_pattern.corner[1])), color, 3)
+    cv.circle(result, (int(l_pattern.corner[0]), int(l_pattern.corner[1])), 5, (0, 0, 255), -1)
 
+    return result
+
+def draw_l_patterns(image: np.ndarray, patterns: List[LPattern],
+                    color: Tuple[int, int, int] = (255, 0, 255)) -> np.ndarray:
+    result = image.copy()
+
+    for pattern in patterns:
+        v1 = (int(pattern.vertex1[0]), int(pattern.vertex1[1]))
+        corner = (int(pattern.corner[0]), int(pattern.corner[1]))
+        v2 = (int(pattern.vertex2[0]), int(pattern.vertex2[1]))
+
+        cv.line(result, v1, corner, color, 2)
+        cv.line(result, corner, v2, color, 2)
+        cv.circle(result, corner, 4, (0, 0, 255), -1)
+        cv.circle(result, v1, 3, (255, 255, 0), -1)
+        cv.circle(result, v2, 3, (255, 255, 0), -1)
+
+    return result
+
+def show_pattern(frame: np.ndarray, pattern: LPattern, label: str, accepted: bool,
+                  window: str = "l pattern debug", debug: DebugSink = NullSink()):
+    img = frame.copy()
+    color = (0, 255, 0) if accepted else (0, 0, 255)
+    img = draw_l_pattern(img, pattern, color)
+    lx, ly, lw, lh = pattern.bounding_box()
+    cv.rectangle(img, (lx, ly), (lx + lw, ly + lh), color, 1)
+    cv.putText(img, label, (5, 18), cv.FONT_HERSHEY_SIMPLEX, 0.5, color, 1, cv.LINE_AA)
+    debug.show(window, img)
+    debug.pause()
+
+def draw_segments(image: np.ndarray, segments: List[LineSegment],
+                  color: Tuple[int, int, int] = (0, 255, 0)) -> np.ndarray:
+    result = image.copy()
+    for seg in segments:
+        pt1 = (int(seg.p1[0]), int(seg.p1[1]))
+        pt2 = (int(seg.p2[0]), int(seg.p2[1]))
+        cv.line(result, pt1, pt2, color, 5)
     return result
 
 def draw_results(frame: np.ndarray, results: List[DetectionResult],
@@ -71,7 +107,7 @@ def draw_precise_location(image: np.ndarray,
 
     return result
 
-def _draw_scan_debug(edge_img: np.ndarray, borders: list, all_border_pts: list,
+def draw_scan_debug(edge_img: np.ndarray, borders: list, all_border_pts: list,
                      fitted_lines: list, deb: DebugSink) -> None:
     if len(edge_img.shape) == 2:
         debug = cv.cvtColor(edge_img, cv.COLOR_GRAY2BGR)
@@ -116,12 +152,8 @@ def _draw_scan_debug(edge_img: np.ndarray, borders: list, all_border_pts: list,
     deb.show("border_fitter: ransac lines", with_lines)
     deb.show("border_fitter: legend", legend)
     deb.pause()
-    # cv.imshow("border_fitter: sampled points", pts_only)
-    # cv.imshow("border_fitter: ransac lines", with_lines)
-    # cv.imshow("border_fitter: legend", legend)
-    # cv.waitKey(0)
 
-def _draw_extent_debug(warped: np.ndarray, binary: np.ndarray,
+def draw_extent_debug(warped: np.ndarray, binary: np.ndarray,
                        x_left: int, y_top: int, x_right: int, y_bottom: int, debug: DebugSink) -> None:
     warped_bgr = cv.cvtColor(warped, cv.COLOR_GRAY2BGR)
     binary_bgr = cv.cvtColor(binary, cv.COLOR_GRAY2BGR)
@@ -135,11 +167,8 @@ def _draw_extent_debug(warped: np.ndarray, binary: np.ndarray,
     debug.show("border_fitter: warped + extent", warped_bgr)
     debug.show("border_fitter: binary + extent", binary_bgr)
     debug.pause()
-    # cv.imshow("border_fitter: warped + extent", warped_bgr)
-    # cv.imshow("border_fitter: binary + extent", binary_bgr)
-    # cv.waitKey(0)
 
-def _show_fitted_lines(cleaned: np.ndarray, lines: list, all_pts: list,
+def show_fitted_lines(cleaned: np.ndarray, lines: list, all_pts: list,
                        corners: list, window: str = "border fit", need_resize: bool = False,
                        debug: DebugSink = NullSink()) -> None:
     """Show the cleaned DMC with each side's boundary points, the fitted
@@ -173,10 +202,8 @@ def _show_fitted_lines(cleaned: np.ndarray, lines: list, all_pts: list,
 
     debug.show(window, vis)
     debug.pause()
-    # cv.imshow(window, vis)
-    # cv.waitKey(0)
 
-def _show_sampled_points(cleaned: np.ndarray, pts: np.ndarray, window: str = "sampled points",
+def show_sampled_points(cleaned: np.ndarray, pts: np.ndarray, window: str = "sampled points",
                          color: tuple = (0, 0, 255), need_resize: bool = False, debug: DebugSink = NullSink()):
     vis = cv.cvtColor(cleaned, cv.COLOR_GRAY2BGR)
 
@@ -192,10 +219,8 @@ def _show_sampled_points(cleaned: np.ndarray, pts: np.ndarray, window: str = "sa
 
     debug.show(window, vis)
     debug.pause()
-    # cv.imshow(window, vis)
-    # cv.waitKey(0)
 
-def _show_scanned_lines(edge_img: np.ndarray,
+def show_scanned_lines(edge_img: np.ndarray,
                         coords_per_angle: list,
                         best_angle_idx: Optional[int] = None,
                         chosen_v: Optional[int] = None,
@@ -215,13 +240,11 @@ def _show_scanned_lines(edge_img: np.ndarray,
             vis[rows[chosen_v], cols[chosen_v]] = (0, 255, 0)
 
     debug.show(window, vis)
-    debug.pause(0)
-    # cv.imshow(window, vis)
-    # cv.waitKey(0)
+    debug.pause()
 
 def draw_sampled_border(edge_img: np.ndarray,
-                        upper_coords: Union[list | None],
-                        right_coords: Union[list | None],
+                        upper_coords: list | None,
+                        right_coords: list | None,
                         debug: DebugSink = NullSink()):
     vis = cv.cvtColor(edge_img, cv.COLOR_GRAY2BGR)
     if upper_coords is not None:
@@ -234,5 +257,26 @@ def draw_sampled_border(edge_img: np.ndarray,
 
     debug.show("sampled borders", vis)
     debug.pause()
-    # cv.imshow("sampled borders", vis)
-    # cv.waitKey(0)
+
+def draw_module_numbers(image: np.ndarray, col_centres: np.ndarray,
+                        row_centres: np.ndarray, scale: float = 2.0,
+                        color: Tuple[int, int, int] = (0, 0, 255)) -> np.ndarray:
+    """Return a BGR copy of ``image`` (upscaled by ``scale`` for legibility)
+    with each module's 1-based, row-major number drawn centred on its
+    center. Returns a new image because the upscale can't be done in place."""
+    vis = cv.resize(image, None, fx=scale, fy=scale, interpolation=cv.INTER_NEAREST)
+    if vis.ndim == 2:
+        vis = cv.cvtColor(vis, cv.COLOR_GRAY2BGR)
+
+    cc = np.asarray(col_centres, dtype=float) * scale
+    rc = np.asarray(row_centres, dtype=float) * scale
+    n_cols = len(cc)
+    font, font_scale, thickness = cv.FONT_HERSHEY_SIMPLEX, 0.3, 1
+
+    for i in range(len(rc)):
+        for j in range(n_cols):
+            text = str(i * n_cols + j + 1)
+            (tw, th), _ = cv.getTextSize(text, font, font_scale, thickness)
+            org = (int(round(cc[j] - tw / 2.0)), int(round(rc[i] + th / 2.0)))
+            cv.putText(vis, text, org, font, font_scale, color, thickness, cv.LINE_AA)
+    return vis

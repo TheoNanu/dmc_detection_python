@@ -6,48 +6,9 @@ import numpy as np
 from typing import List, Tuple, Optional, Union
 from dataclasses import dataclass
 
-from debug import DebugSink, NullSink
-
-
-@dataclass
-class LineSegment:
-    p1: Tuple[float, float]
-    p2: Tuple[float, float]
-    marked: bool = False
-
-    @property
-    def length(self) -> float:
-        return np.sqrt((self.p2[0] - self.p1[0]) ** 2 + (self.p2[1] - self.p1[1]) ** 2)
-
-    @property
-    def angle(self) -> float:
-        return np.arctan2(self.p2[1] - self.p1[1], self.p2[0] - self.p1[0])
-
-
-@dataclass
-class LPattern:
-    vertex1: Tuple[float, float]
-    corner: Tuple[float, float]
-    vertex2: Tuple[float, float]
-    len1: float
-    len2: float
-    score: float = 0.0
-
-    def get_bounding_box(self, padding: int = 0) -> Tuple[int, int, int, int]:
-        xs = [self.vertex1[0], self.corner[0], self.vertex2[0]]
-        ys = [self.vertex1[1], self.corner[1], self.vertex2[1]]
-        fourth_corner_x = self.vertex1[0] + self.vertex2[0] - self.corner[0]
-        fourth_corner_y = self.vertex1[1] + self.vertex2[1] - self.corner[1]
-        pts = np.array([self.vertex1, self.vertex2, self.corner, (fourth_corner_x, fourth_corner_y)], dtype=np.float32)
-        x, y, w, h = cv.boundingRect(pts.astype(np.int32))
-        if padding != 0:
-            x = x - padding
-            y = y - padding
-            w = w + padding
-            h = h + padding
-        x_min, x_max = int(min(xs)), int(max(xs))
-        y_min, y_max = int(min(ys)), int(max(ys))
-        return x, y, w, h
+from dmc.data import LineSegment, LPattern
+from dmc.debug import DebugSink, NullSink
+from dmc.viz import draw_segments, draw_l_patterns
 
 
 class LFinderDetector:
@@ -327,7 +288,7 @@ class LFinderDetector:
                                     min_transitions_per_line: int = 4,
                                     num_scan_lines: int = 5) -> bool:
         img_h, img_w = gray.shape[:2]
-        lx, ly, lw, lh = pattern.get_bounding_box()
+        lx, ly, lw, lh = pattern.bounding_box()
         x1, y1 = max(0, lx), max(0, ly)
         x2, y2 = min(img_w, lx + lw), min(img_h, ly + lh)
 
@@ -396,11 +357,6 @@ class LFinderDetector:
     def find_l_patterns(self, frame: np.ndarray, gray: np.ndarray, segments: List[LineSegment]) -> List[LPattern]:
         l_patterns = []
 
-        seg_vis = self.draw_segments(frame, segments, color=(0, 255, 255))
-        # print(f"[L-finder] LSD detected {len(segments)} segments")
-        # cv.imshow("lsd segments", seg_vis)
-        # cv.waitKey(0)
-
         for i, seg_i in enumerate(segments):
             if seg_i.marked:
                 continue
@@ -448,11 +404,7 @@ class LFinderDetector:
                 score = self._calculate_score(angle, ratio, conn_dist)
 
                 if score > best_score:
-                    # print(f"[L-finder] new best score found: {score}, previous best score: {best_score}")
                     best_score = score
-                    pattern_img = frame.copy()
-                    if best_pattern:
-                        pattern_img = self.draw_l_patterns(pattern_img, [best_pattern], (0, 255, 255))
                     best_j = j
                     best_pattern = LPattern(
                         vertex1=vertex1,
@@ -462,10 +414,6 @@ class LFinderDetector:
                         len2=min(len_i, len_j),
                         score=score
                     )
-                    pattern_img = self.draw_l_patterns(pattern_img, [best_pattern], (255, 0, 255))
-
-                    # cv.imshow("pattern_img", pattern_img)
-                    # cv.waitKey(0)
 
             if best_pattern is None and seg_i.length >= 50:
                 self.debug.log(f"[L-finder] anchor seg#{i} (len={seg_i.length:.0f}) "
@@ -497,47 +445,3 @@ class LFinderDetector:
     def detect(self, region: np.ndarray) -> List[LPattern]:
         segments = self.detect_lines(region)
         return self.find_l_patterns(region, segments)
-
-    def _show_pattern(self, frame: np.ndarray, pattern: LPattern, label: str, accepted: bool,
-                      window: str = "l pattern debug"):
-        img = frame.copy()
-        color = (0, 255, 0) if accepted else (0, 0, 255)
-        cv.line(img,
-                (int(pattern.vertex1[0]), int(pattern.vertex1[1])),
-                (int(pattern.corner[0]), int(pattern.corner[1])), color, 3)
-        cv.line(img,
-                (int(pattern.vertex2[0]), int(pattern.vertex2[1])),
-                (int(pattern.corner[0]), int(pattern.corner[1])), color, 3)
-        cv.circle(img, (int(pattern.corner[0]), int(pattern.corner[1])), 5, (0, 0, 255), -1)
-        lx, ly, lw, lh = pattern.get_bounding_box()
-        cv.rectangle(img, (lx, ly), (lx + lw, ly + lh), color, 1)
-        cv.putText(img, label, (5, 18), cv.FONT_HERSHEY_SIMPLEX, 0.5, color, 1, cv.LINE_AA)
-        self.debug.show(window, img)
-        self.debug.pause()
-
-    @staticmethod
-    def draw_segments(image: np.ndarray, segments: List[LineSegment],
-                      color: Tuple[int, int, int] = (0, 255, 0)) -> np.ndarray:
-        result = image.copy()
-        for seg in segments:
-            pt1 = (int(seg.p1[0]), int(seg.p1[1]))
-            pt2 = (int(seg.p2[0]), int(seg.p2[1]))
-            cv.line(result, pt1, pt2, color, 5)
-        return result
-
-    @staticmethod
-    def draw_l_patterns(image: np.ndarray, patterns: List[LPattern],
-                        color: Tuple[int, int, int] = (255, 0, 255)) -> np.ndarray:
-        result = image.copy()
-        for pattern in patterns:
-            v1 = (int(pattern.vertex1[0]), int(pattern.vertex1[1]))
-            corner = (int(pattern.corner[0]), int(pattern.corner[1]))
-            v2 = (int(pattern.vertex2[0]), int(pattern.vertex2[1]))
-
-            cv.line(result, v1, corner, color, 2)
-            cv.line(result, corner, v2, color, 2)
-            cv.circle(result, corner, 4, (0, 0, 255), -1)
-            cv.circle(result, v1, 3, (255, 255, 0), -1)
-            cv.circle(result, v2, 3, (255, 255, 0), -1)
-
-        return result

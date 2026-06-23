@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "dmc"
+version = "0.1.0"
+description = "Data Matrix Code detection and decoding"
+requires-python = ">=3.10"
+dependencies = [
+    "numpy",
+    "opencv-python",
+]
+
+[project.optional-dependencies]
+test = [
+    "pytest",
+    "pillow",
+]
+
+[tool.setuptools.packages.find]
+include = ["dmc*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+markers = [
+  "benchmark: non-gating comparison vs reference decoders (deselected by default)",
+]

@@ -1,21 +1,22 @@
 import cv2 as cv
 import numpy as np
 from typing import Tuple, Optional
-import matplotlib.pyplot as plt
+
+from dmc.debug import DebugSink, NullSink
 
 
 class GridEstimator:
-    valid_size = [10, 12, 14, 16, 18, 20, 22, 24, 26, 32, 40, 44, 48, 52, 64, 72, 80, 88, 96, 104, 120, 132, 144]
-
     def __init__(self,
                  band_thickness: int = 11,
                  margin: int = 5,
                  hp_sigma: int = 9,
-                 pitch_range: Tuple[int, int] = (3, 40)):
+                 pitch_range: Tuple[int, int] = (3, 40),
+                 debug: DebugSink = NullSink()):
         self.k = band_thickness
         self.margin = margin
         self.hp_sigma = hp_sigma
         self.pitch_range = pitch_range
+        self.debug = debug
 
     def estimate_pitch(self, warp_gray: np.ndarray, off: int = 4) -> Tuple[Optional[float], float]:
         h, w = warp_gray.shape[:2]
@@ -70,7 +71,7 @@ class GridEstimator:
 
         col_bounds, raw_col_bounds = self._timing_boundaries(warp_gray, axis="x", off=off)
         row_bounds, raw_row_bounds = self._timing_boundaries(warp_gray, axis="y", off=off)
-        print(f"[estimate-grid] col bounds: {col_bounds} raw col bounds: {raw_col_bounds} row bounds: {row_bounds} raw row bounds: {raw_row_bounds}")
+        self.debug.log(f"[estimate-grid] col bounds: {col_bounds} raw col bounds: {raw_col_bounds} row bounds: {row_bounds} raw row bounds: {raw_row_bounds}")
         if col_bounds is None or row_bounds is None:
             return None
 
@@ -87,38 +88,23 @@ class GridEstimator:
             band = img[self.margin:h - self.margin, w - off - self.k:w - off]
             prof = np.median(band.astype(np.float32), axis=1)
 
-        cv.imshow(f"band {axis}", cv.resize(band, dsize=None, fx=2.0, fy=2.0, interpolation=cv.INTER_NEAREST))
-        cv.waitKey(0)
-        cv.imwrite(f"band{axis}.png", band)
-        print(f"Profile: {prof}")
-        hp1, cr, pol, raw_cr = self._subpixel_transitions(prof, amp_window=5)
-        print(f"[estimator] Initial number of transitions found: {cr.shape[0]}")
+        self.debug.show(f"band {axis}", cv.resize(band, dsize=None, fx=2.0, fy=2.0, interpolation=cv.INTER_NEAREST))
+        self.debug.pause()
 
-        # x = np.arange(0, hp1.shape[0])
-        # fig, axs = plt.subplots(2, 1)
-        # h, w = band.shape[:2]
-        # if h > w:
-        #     band_plt = band.T
-        # else:
-        #     band_plt = band
-        # axs[0].imshow(cv.cvtColor(band_plt, cv.COLOR_GRAY2BGR))
-        # axs[1].plot(x, hp1)
-        # axs[1].set_xlim(0, x.shape[0])
-        #
-        # for c, r in zip(cr, raw_cr):
-        #     axs[1].axvline(x=c, color="red", linestyle="--", linewidth=1.5)
-        #     axs[1].axvline(x=r, color="green", linestyle="--", linewidth=1.5)
-        #
-        # axs[1].axhline(y=0, color="grey", linestyle="--", linewidth=1.5)
-        # plt.show()
+        self.debug.log(f"Profile: {prof}")
+
+        hp1, cr, pol, raw_cr = self._subpixel_transitions(prof, amp_window=5)
+
+        self.debug.log(f"[estimator] Initial number of transitions found: {cr.shape[0]}")
 
         cr, pol, raw_cr = self._reject_spurious(cr, pol, raw_cr)
-        print(f"[estimator] Number of transitions after first filter: {cr.shape[0]}")
-        print(f"[estimator] Transitions: {cr}")
-        print(f"[estimator] Polarities: {pol}")
+
+        self.debug.log(f"[estimator] Number of transitions after first filter: {cr.shape[0]}")
+        self.debug.log(f"[estimator] Transitions: {cr}")
+        self.debug.log(f"[estimator] Polarities: {pol}")
 
         # Terminal-polarity constraint. The timing pattern's corner modules fix
-        # the colour change at each end, so the first and last *real* transition
+        # the color change at each end, so the first and last *real* transition
         # have a known direction (and, since ECC200 sizes are even, the same one
         # at both ends). The top border (columns) ends black->white (+1); the
         # right border (rows) ends white->black (-1). A transition of the wrong
@@ -132,32 +118,15 @@ class GridEstimator:
             hi -= 1
         cr = cr[lo:hi]
         raw_cr = raw_cr[lo:hi]
-        print(f"[estimator] lo: {lo} hi: {hi}")
-        print(f"[estimator] Transitions: {cr}")
 
-        print(f"[estimator] Number of transitions after polarity filter: {cr.shape[0]}")
+        self.debug.log(f"[estimator] lo: {lo} hi: {hi}")
+        self.debug.log(f"[estimator] Transitions: {cr}")
+
+        self.debug.log(f"[estimator] Number of transitions after polarity filter: {cr.shape[0]}")
 
         cr, raw_cr = self._regularize_transitions(cr, raw_cr)
 
-        print(f"[estimator] Number of transitions after second filter: {cr.shape[0]}")
-
-        x = np.arange(0, hp1.shape[0])
-        fig, axs = plt.subplots(2, 1)
-        h, w = band.shape[:2]
-        if h > w:
-            band_plt = band.T
-        else:
-            band_plt = band
-        axs[0].imshow(cv.cvtColor(band_plt, cv.COLOR_GRAY2BGR))
-        axs[1].plot(x, hp1)
-        axs[1].set_xlim(0, x.shape[0])
-
-        for c, r in zip(cr, raw_cr):
-            axs[1].axvline(x=c, color="red", linestyle="--", linewidth=1.5)
-            axs[1].axvline(x=r, color="green", linestyle="--", linewidth=1.5)
-
-        axs[1].axhline(y=0, color="grey", linestyle="--", linewidth=1.5)
-        plt.show()
+        self.debug.log(f"[estimator] Number of transitions after second filter: {cr.shape[0]}")
 
         if len(cr) < 6:  # need a handful of modules for a meaningful grid
             return None, None
@@ -192,13 +161,11 @@ class GridEstimator:
                         and abs(gaps[i] + gaps[i + 1] - pitch) < sum_tol_frac * pitch):
                     cr = np.delete(cr, i + 1)  # drop the mid-module transition
                     raw_cr = np.delete(raw_cr, i + 1)
-                    print(f"[estimator] regularize transitions deleted transition at: {i + 1}")
                     changed = True
                     break
         return cr, raw_cr
 
-    @staticmethod
-    def _subpixel_transitions(prof: np.ndarray,
+    def _subpixel_transitions(self, prof: np.ndarray,
                               min_amplitude: float = 0.3,
                               amp_window: int = 3) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
         """Sub-pixel zero-crossings of the high-passed border profile/DoG style filtered border profile, zero-crossings
@@ -230,7 +197,7 @@ class GridEstimator:
 
         cr, pol, raw_cr = [], [], []
 
-        print(f"High-pass filter: {hp}")
+        self.debug.log(f"High-pass filter: {hp}")
         for i in range(len(hp) - 1):
             # zero-crossings are found where there is a sign difference between 2 adjacent samples in the high-pass band
             # a zero-value in the current position can be a sign of a zero-crossing but also a sign of a flat surface
@@ -240,9 +207,11 @@ class GridEstimator:
                 # crossing, not just a sign flip in near-zero noise
                 left_peak = np.max(np.abs(hp[max(0, i - amp_window):i + 1]))
                 right_peak = np.max(np.abs(hp[i + 1:i + 2 + amp_window]))
-                print(f"[estimator] zero-crossing found at: {i}-{i+1} with amplitude: {left_peak}x{right_peak}")
+
+                self.debug.log(f"[estimator] zero-crossing found at: {i}-{i+1} with amplitude: {left_peak}x{right_peak}")
+
                 if min(left_peak, right_peak) < min_amplitude:
-                    print(f"[estimator] Not passing the min amplitude gate")
+                    self.debug.log(f"[estimator] Not passing the min amplitude gate")
                     continue
                 # linear interpolation of the zero-crossing
                 frac = abs(hp[i]) / (abs(hp[i]) + abs(hp[i + 1]))
@@ -254,8 +223,7 @@ class GridEstimator:
                 pol.append(-1 if hp[i] > 0 else +1)
         return hp, np.array(cr), np.array(pol, dtype=int), np.array(raw_cr)
 
-    @staticmethod
-    def _reject_spurious(cr: np.ndarray, pol: np.ndarray, raw_cr: np.ndarray,
+    def _reject_spurious(self, cr: np.ndarray, pol: np.ndarray, raw_cr: np.ndarray,
                          min_frac: float = 0.5) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
         """Drop transitions closer than ``min_frac`` of the median spacing to
         their predecessor — these are noise crossings, not module boundaries."""
@@ -269,7 +237,8 @@ class GridEstimator:
             if cr[i] - cr[keep_idx[-1]] >= min_frac * spacing:
                 keep_idx.append(i)
 
-        print(f"[estimator] reject spurious transitions kept: {keep_idx}")
+        self.debug.log(f"[estimator] reject spurious transitions kept: {keep_idx}")
+
         return cr[keep_idx], pol[keep_idx], raw_cr[keep_idx]
 
     @staticmethod
@@ -304,7 +273,7 @@ class GridEstimator:
     @staticmethod
     def _centres_to_boundaries(centres: np.ndarray) -> np.ndarray:
         """N module centres -> N+1 cell boundaries (midpoints between adjacent
-        centres, with the two outer edges extrapolated)."""
+        centers, with the two outer edges extrapolated)."""
         c = np.asarray(centres, dtype=float)
         inner = (c[:-1] + c[1:]) / 2.0
         first = c[0] - (c[1] - c[0]) / 2.0
@@ -321,44 +290,12 @@ class GridEstimator:
         for y in self._centres_to_boundaries(row_centres):
             cv.line(image, (0, int(round(y))), (w, int(round(y))), color, 1)
 
-    def draw_module_numbers(self, image: np.ndarray, col_centres: np.ndarray,
-                            row_centres: np.ndarray, scale: float = 2.0,
-                            color: Tuple[int, int, int] = (0, 0, 255)) -> np.ndarray:
-        """Return a BGR copy of ``image`` (upscaled by ``scale`` for legibility)
-        with each module's 1-based, row-major number drawn centred on its
-        centre. Returns a new image because the upscale can't be done in place."""
-        vis = cv.resize(image, None, fx=scale, fy=scale, interpolation=cv.INTER_NEAREST)
-        if vis.ndim == 2:
-            vis = cv.cvtColor(vis, cv.COLOR_GRAY2BGR)
-
-        cc = np.asarray(col_centres, dtype=float) * scale
-        rc = np.asarray(row_centres, dtype=float) * scale
-        n_cols = len(cc)
-        font, font_scale, thickness = cv.FONT_HERSHEY_SIMPLEX, 0.3, 1
-
-        for i in range(len(rc)):
-            for j in range(n_cols):
-                text = str(i * n_cols + j + 1)
-                (tw, th), _ = cv.getTextSize(text, font, font_scale, thickness)
-                org = (int(round(cc[j] - tw / 2.0)), int(round(rc[i] + th / 2.0)))
-                cv.putText(vis, text, org, font, font_scale, color, thickness, cv.LINE_AA)
-        return vis
-
-    @staticmethod
-    def _median_profile_from_band(img: np.ndarray, y0: int, y1: int, x0: int, x1: int) -> np.ndarray:
-        # cv.rectangle(img, (x0, y0), (x1, y1), (0, 0, 255), 1)
-        # cv.imshow("original", img)
-        print(f"x0: {x0}, y0: {y0}, x1: {x1}, y1: {y1}")
+    def _median_profile_from_band(self, img: np.ndarray, y0: int, y1: int, x0: int, x1: int) -> np.ndarray:
+        self.debug.log(f"x0: {x0}, y0: {y0}, x1: {x1}, y1: {y1}")
         band = img[y0:y1, x0:x1]
-        visualize = cv.resize(band, (band.shape[1] * 4, band.shape[0] * 4))
-        print(f"Original band: {band}")
+        self.debug.log(f"Original band: {band}")
         band = band.astype(np.float32)
-        print(f"Casted band: {band}")
-        # cv.imshow("band", visualize)
-        # cv.waitKey(0)
-        visualize = visualize.astype(np.float32)
-        # cv.imshow("cast", visualize)
-        # cv.waitKey(0)
+        self.debug.log(f"Casted band: {band}")
         prof = np.median(band, axis=0)
         return prof
 
@@ -367,10 +304,7 @@ class GridEstimator:
         prof -= prof.mean()
 
         p2 = prof.reshape(1, -1)
-        print(f"HIGHPASS 1D P2: {p2}")
         trend = cv.GaussianBlur(p2, ksize=(0, 0), sigmaX=self.hp_sigma, borderType=cv.BORDER_REPLICATE).reshape(-1)
-        print(f"HIGHPASS 1D TREND: {trend}")
-        # sa vad rezultatele
         hp = prof - trend
 
         s = hp.std()
@@ -381,7 +315,6 @@ class GridEstimator:
     @staticmethod
     def _autocorr(hp: np.ndarray) -> np.ndarray:
         r = np.correlate(hp, hp, mode='full').astype(np.float32)
-        # sa vad rezultatul
         mid = len(r) // 2
         r = r[mid:]
 
@@ -418,26 +351,8 @@ class GridEstimator:
         transitions = np.sum(bits[1:] != bits[:-1])
         return transitions / max(1, (len(bits) - 1))
 
-    def draw_grid(self, image: np.ndarray, horizontal_pitch: float, vertical_pitch: float) -> None:
-        h, w = image.shape[:2]
-
-        i = 1
-        while True:
-            y = int(round(i * horizontal_pitch))
-            if y >= h:
-                break
-            cv.line(image, (0, y), (w, y), 255, 1)
-            i += 1
-
-        i = 1
-        while True:
-            x = int(round(i * vertical_pitch))
-            if x >= w:
-                break
-            cv.line(image, (x, 0), (x, h), 255, 1)
-            i += 1
-
-    def get_matrix_data(self, image: np.ndarray, horizontal_pitch: float, vertical_pitch: float, rows: int,
+    @staticmethod
+    def get_matrix_data(image: np.ndarray, horizontal_pitch: float, vertical_pitch: float, rows: int,
                         cols: int) -> np.ndarray:
         result = np.zeros(shape=(rows - 2, cols - 2), dtype=np.uint8)
 

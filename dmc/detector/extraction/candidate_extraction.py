@@ -2,7 +2,7 @@ import cv2 as cv
 import numpy as np
 from typing import List, Tuple
 
-from debug import DebugSink, NullSink
+from dmc.debug import DebugSink, NullSink
 
 
 class CandidateExtraction:
@@ -24,23 +24,9 @@ class CandidateExtraction:
         self.debug = debug
 
     @staticmethod
-    def _auto_canny(image: np.ndarray, sigma: float = 0.33) -> np.ndarray:
-        v = float(np.median(image))
-        lower = int(max(0.0, (1.0 - sigma) * v))
-        upper = int(min(255.0, (1.0 + sigma) * v))
-        print(f"Canny lower: {lower} upper: {upper}")
-        return cv.Canny(image, lower, upper)
-
-    def edge_detection(self, image_gray: np.ndarray) -> np.ndarray:
-        return self._auto_canny(image_gray)
-
-    @staticmethod
     def morphological_processing(edges: np.ndarray, dilate_kernel_size: int = 4, open_kernel_size: int = 5) -> np.ndarray:
         edges_copy = edges.copy()
         edges_copy = cv.bitwise_not(edges_copy)
-
-        # cv.imshow("edges copy", edges_copy)
-        # cv.waitKey(0)
 
         kernel_open = cv.getStructuringElement(cv.MORPH_RECT, (open_kernel_size, open_kernel_size))
         processed = cv.morphologyEx(edges_copy, cv.MORPH_OPEN, kernel_open)

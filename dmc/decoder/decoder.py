@@ -1,13 +1,14 @@
 from typing import Optional
 
 import cv2 as cv
+import numpy as np
 
-from config import DecoderConfig
-from data import Decoded
-from debug import DebugSink, NullSink
-from dm_decoder.grid_estimation import GridEstimator
-from dm_detector import DetectionResult
-from utils.utils import valid_shape
+from dmc.config import DecoderConfig
+from dmc.data import Decoded
+from dmc.debug import DebugSink, NullSink
+from dmc.decoder.grid_estimation import GridEstimator
+from dmc.detector import DetectionResult
+from dmc.utils import valid_shape
 
 
 class Decoder:
@@ -16,7 +17,13 @@ class Decoder:
         self.estimator = GridEstimator(margin=self.config.estimator_margin)
         self.debug = debug
 
-    def decode(self, image, detection: DetectionResult) -> Optional[Decoded]:
+    def decode(self, image: np.ndarray, detection: DetectionResult) -> Optional[Decoded]:
+        if not isinstance(image, np.ndarray):
+            raise ValueError("Input image should be a numpy array")
+
+        if len(image.shape) != 3:
+            raise ValueError("Input image should have 3 channels")
+
         warp = detection.rectify(image, output_size=self.config.output_size)
 
         if warp is None:
@@ -48,6 +55,8 @@ class Decoder:
 
         if matrix is None or not valid_shape(matrix.shape[0], matrix.shape[1], self.config.valid_sizes):
             return None
+
+        self.debug.pause()
 
         codewords = self.estimator.ecc200_codewords_from_data_modules(matrix)
 

@@ -1,9 +1,9 @@
 import cv2 as cv
 import numpy as np
 
-from data import ValidationResult
-from debug import DebugSink, NullSink
-from utils.utils import auto_canny
+from dmc.data import ValidationResult
+from dmc.debug import DebugSink, NullSink
+from dmc.utils import auto_canny
 from .l_finder_detector import LPattern
 
 
@@ -40,18 +40,12 @@ class DataMatrixValidator:
             return ValidationResult(False, 0, aspect_ratio, 0, reason)
 
         # Crop to the L-pattern bounding box so large regions don't dilute density
-        lx, ly, lw, lh = l_pattern.get_bounding_box()
+        lx, ly, lw, lh = l_pattern.bounding_box()
         x1, y1 = max(0, lx), max(0, ly)
         x2, y2 = min(w, lx + lw), min(h, ly + lh)
         roi = gray_region[y1:y2, x1:x2] if x2 > x1 and y2 > y1 else gray_region
         roi = cv.medianBlur(roi, 7)
 
-        # CLAHE before Canny so low-exposure regions still produce edges
-        # clahe = cv.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
-        # roi_enhanced = clahe.apply(roi)
-
-        # cv.imshow("roi", roi)
-        # cv.imshow("roi_enhanced", roi_enhanced)
         edges = auto_canny(roi)
 
         self.debug.show("edges", edges)

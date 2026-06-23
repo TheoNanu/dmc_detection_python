@@ -1,21 +1,13 @@
 import cv2 as cv
 import numpy as np
-from typing import Tuple, Optional, Union
-from dataclasses import dataclass
+from typing import Tuple, Optional
 
-from debug import DebugSink, NullSink
-from utils.utils import auto_canny
+from dmc.data import DataMatrixLocation
+from dmc.debug import DebugSink, NullSink
+from dmc.utils import auto_canny
+from dmc.viz import draw_sampled_border, show_scanned_lines
 from .l_finder_detector import LPattern
 
-@dataclass
-class DataMatrixLocation:
-    l_pattern: LPattern
-    upper_border: Tuple[int, int, int, int]
-    right_border: Tuple[int, int, int, int]
-    bounding_box: Tuple[int, int, int, int]
-    quads: Tuple[Tuple[int, int], Tuple[int, int], Tuple[int, int], Tuple[int, int]]
-    upper_outer_coords: list
-    right_outer_coords: list
 
 class DashedBorderDetector:
 
@@ -37,7 +29,7 @@ class DashedBorderDetector:
 
         # Classify arms by orientation. The "horizontal" arm is the one whose
         # direction vector is more aligned with the x-axis; its far end is the
-        # DMC's opposite-to-corner horizontal neighbour. The other arm is
+        # DMC's opposite-to-corner horizontal neighbor. The other arm is
         # vertical. LPattern.vertex1/vertex2 ordering is arbitrary, so we never
         # rely on it — classification is purely geometric.
         if abs(arm_a[0]) > abs(arm_a[1]):
@@ -195,7 +187,7 @@ class DashedBorderDetector:
             per_angle.append(rows)
 
         if best is None or best[0] <= 0.0:
-            self._show_scanned_lines(edge_img, coords_per_angle)
+            show_scanned_lines(edge_img, coords_per_angle, debug=self.debug)
             return 0, np.array([]), [], 0
 
         # outermost row above threshold, at the best angle
@@ -209,11 +201,10 @@ class DashedBorderDetector:
 
         self.debug.log(f"[dashed] best angle {angles[a_idx]:+.1f} deg, outermost row v={chosen_v} "
               f"(best v={best[3]}), transitions={transitions}, score={per_angle[a_idx][chosen_v][0]:.1f}")
-        # print(f"[dashed] best angle {angles[a_idx]:+.1f} deg, outermost row v={chosen_v} "
-        #       f"(best v={best[3]}), transitions={transitions}, score={per_angle[a_idx][chosen_v][0]:.1f}")
 
-        self._show_scanned_lines(edge_img, coords_per_angle,
-                                 best_angle_idx=a_idx, chosen_v=chosen_v)
+
+        show_scanned_lines(edge_img, coords_per_angle,
+                                 best_angle_idx=a_idx, chosen_v=chosen_v, debug=self.debug)
 
         edge_row = np.empty(u_len)
         sampled_coords = []
@@ -358,15 +349,6 @@ class DashedBorderDetector:
         transitions = np.sum(np.abs(np.diff(binary_border)))
         return int(transitions)
 
-    @staticmethod
-    def _auto_canny(image: np.ndarray, percentile: float = 90.0) -> np.ndarray:
-        gx = cv.Sobel(image, cv.CV_16S, 1, 0, ksize=3)
-        gy = cv.Sobel(image, cv.CV_16S, 0, 1, ksize=3)
-        mag = np.abs(gx.astype(np.int32)) + np.abs(gy.astype(np.int32))  # L1, matches Canny's default norm
-        upper = max(1.0, float(np.percentile(mag, percentile)))
-        lower = 0.5 * upper
-        return cv.Canny(image, lower, upper)
-
     def detect(self, gray_img: np.ndarray, l_pattern: LPattern,
                scan_method: str = "angle", smoothing: int = 15, canny_percentile: float = 90.0) -> Tuple[Optional[DataMatrixLocation], np.ndarray]:
         """Locate the dashed borders of the symbol whose L finder pattern is
@@ -402,7 +384,7 @@ class DashedBorderDetector:
                                                                                     inward_right_unit, horiz_vertex,
                                                                                     int(border_len_right), int(right_inward), **scan_kwargs)
 
-        self.draw_sampled_border(edges, upper_coords, right_coords)
+        draw_sampled_border(edges, upper_coords, right_coords, debug=self.debug)
 
         t_upper = self.count_transitions(extracted_arr_upper)
         t_right = self.count_transitions(extracted_arr_right)
@@ -439,62 +421,3 @@ class DashedBorderDetector:
             upper_outer_coords=upper_outer_coords,
             right_outer_coords=right_outer_coords
         ), edges
-
-    @staticmethod
-    def _show_scanned_lines(edge_img: np.ndarray,
-                            coords_per_angle: list,
-                            best_angle_idx: Optional[int] = None,
-                            chosen_v: Optional[int] = None,
-                            window: str = "scanned lines"):
-        """One composite overlay of every line the scan visited: all angles in
-        dim red, the best angle's rows in yellow, the chosen line in green."""
-        if not coords_per_angle:
-            return
-        vis = cv.cvtColor(edge_img, cv.COLOR_GRAY2BGR)
-        for rows, cols in coords_per_angle:
-            vis[rows, cols] = (60, 60, 200)
-        if best_angle_idx is not None:
-            rows, cols = coords_per_angle[best_angle_idx]
-            vis[rows, cols] = (0, 255, 255)
-            if chosen_v is not None:
-                vis[rows[chosen_v], cols[chosen_v]] = (0, 255, 0)
-        cv.imshow(window, vis)
-        cv.waitKey(0)
-
-    @staticmethod
-    def draw_sampled_border(edge_img: np.ndarray,
-                            upper_coords: Union[list | None],
-                            right_coords: Union[list | None]):
-        vis = cv.cvtColor(edge_img, cv.COLOR_GRAY2BGR)
-        if upper_coords is not None:
-            for (col, row) in upper_coords:
-                vis[row, col] = (0, 0, 255)
-
-        if right_coords is not None:
-            for (col, row) in right_coords:
-                vis[row, col] = (0, 0, 255)
-        cv.imshow("sampled borders", vis)
-        cv.waitKey(0)
-
-    @staticmethod
-    def draw_detection_regions(image: np.ndarray,
-                               upper_region: Tuple[int, int, int, int],
-                               right_region: Tuple[int, int, int, int]) -> np.ndarray:
-        result = image.copy()
-
-        x, y, w, h = upper_region
-        cv.rectangle(result, (x, y), (x + w, y + h), (255, 255, 0), 1)
-
-        x, y, w, h = right_region
-        cv.rectangle(result, (x, y), (x + w, y + h), (0, 255, 255), 1)
-
-        return result
-
-    @staticmethod
-    def draw_location(image: np.ndarray,
-                      location: DataMatrixLocation,
-                      color: Tuple[int, int, int] = (0, 255, 0)) -> np.ndarray:
-        result = image.copy()
-        x, y, w, h = location.bounding_box
-        cv.rectangle(result, (x, y), (x + w, y + h), color, 2)
-        return result

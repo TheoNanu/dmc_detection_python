@@ -2,21 +2,13 @@ import cv2
 import cv2 as cv
 import numpy as np
 from typing import List, Tuple, Optional
-from dataclasses import dataclass
 
-from debug import DebugSink, NullSink
-from dm_detector.location.l_finder_detector import LPattern
-from dm_detector.location.dashed_border_detector import DataMatrixLocation
+from dmc.data import PreciseLocation
+from dmc.debug import DebugSink, NullSink
+from dmc.detector.location.l_finder_detector import LPattern
+from dmc.detector.location.dashed_border_detector import DataMatrixLocation
+from dmc.viz import show_fitted_lines, show_sampled_points, draw_extent_debug, draw_scan_debug
 
-@dataclass
-class PreciseLocation:
-    vertices: List[Tuple[float, float]]
-    center: Tuple[float, float]
-    angle: float
-    size: Tuple[float, float]
-
-    def get_ordered_vertices(self) -> List[Tuple[int, int]]:
-        return [(int(v[0]), int(v[1])) for v in self.vertices]
 
 class BorderFitter:
 
@@ -91,9 +83,9 @@ class BorderFitter:
         quad = np.array([np.array(q, dtype=float) for q in rough_location.quads])
         center = quad.mean(axis=0)
 
-        # 1. Binarise dark modules -> white. The threshold is Otsu computed over
+        # 1. Binarize dark modules -> white. The threshold is Otsu computed over
         #    the DMC *interior* (the rough quad) only, not the whole ROI: on a
-        #    noisy grey surface a global Otsu is biased by the large background
+        #    noisy gray surface a global Otsu is biased by the large background
         #    and floods the image white, which then makes the dilated mask (not
         #    the DMC) the apparent border and pushes the fitted corners outward.
         #    Estimating the threshold from the DMC's own bimodal pixels adapts
@@ -128,11 +120,6 @@ class BorderFitter:
         self.debug.show("clean", cv.resize(clean, dsize=None, fx=2.0, fy=2.0, interpolation=cv.INTER_AREA) if need_rs else clean)
         self.debug.show("filtered", cv.resize(filtered, dsize=None, fx=2.0, fy=2.0, interpolation=cv.INTER_AREA) if need_rs else filtered)
 
-        # cv.imshow("quad mask", cv.resize(quad_mask, dsize=None, fx=2.0, fy=2.0, interpolation=cv.INTER_AREA) if need_rs else quad_mask)
-        # cv.imshow("bw", cv.resize(bw, dsize=None, fx=2.0, fy=2.0, interpolation=cv.INTER_AREA) if need_rs else bw)
-        # cv.imshow("clean", cv.resize(clean, dsize=None, fx=2.0, fy=2.0, interpolation=cv.INTER_AREA) if need_rs else clean)
-        # cv.imshow("filtered", cv.resize(filtered, dsize=None, fx=2.0, fy=2.0, interpolation=cv.INTER_AREA) if need_rs else filtered)
-
         # 2. mask away everything outside the quad
         mask = cv.dilate(quad_mask, cv.getStructuringElement(cv.MORPH_ELLIPSE, (dilate, dilate)))
         cleaned = cv.bitwise_and(filtered, mask)
@@ -140,9 +127,6 @@ class BorderFitter:
 
         self.debug.show("cleaned", cv.resize(cleaned, dsize=None, fx=2.0, fy=2.0, interpolation=cv.INTER_AREA) if need_rs else cleaned)
         self.debug.pause()
-
-        # cv.imshow("cleaned", cv.resize(cleaned, dsize=None, fx=2.0, fy=2.0, interpolation=cv.INTER_AREA) if need_rs else cleaned)
-        # cv.waitKey(0)
 
         # 3. fit an outer-tangent line per side
         lines = []
@@ -161,7 +145,7 @@ class BorderFitter:
             pts = self._scan_boundary_inward(cleaned, p_start, p_end, perp, win_in=win_in, win_out=win_out)
             if len(pts) < 2:
                 return None
-            self._show_sampled_points(cleaned, pts, color=(255, 0, 0), need_resize=need_rs)
+            show_sampled_points(cleaned, pts, color=(255, 0, 0), need_resize=need_rs, debug=self.debug)
             line = self._ransac_line_outer(
                 pts, perp, direction, max_iterations=ransac_iterations, max_outside=max_outside, inlier_threshold=inlier_threshold
             )
@@ -184,66 +168,12 @@ class BorderFitter:
         if any(v is None for v in (corner, horiz, v_diag, vert)):
             return None
 
-        self._show_fitted_lines(cleaned, lines, all_pts, [corner, horiz, v_diag, vert], need_resize=need_rs)
+        show_fitted_lines(cleaned, lines, all_pts, [corner, horiz, v_diag, vert], need_resize=need_rs,
+                          debug=self.debug)
 
         return self._build_precise_location(
             [(float(p[0]), float(p[1])) for p in (corner, horiz, v_diag, vert)]
         )
-
-    @staticmethod
-    def _show_sampled_points(cleaned: np.ndarray, pts: np.ndarray, window: str = "sampled points",
-                             color: tuple = (0, 0, 255), need_resize: bool = False):
-        vis = cv.cvtColor(cleaned, cv.COLOR_GRAY2BGR)
-
-        for p in pts:
-            cv.circle(vis, (int(round(p[0])), int(round(p[1]))), 1, color, -1)
-
-        scale = max(1, int(round(600.0 / max(cleaned.shape[:2]))))
-        if scale > 1:
-            vis = cv.resize(vis, None, fx=scale, fy=scale, interpolation=cv.INTER_NEAREST)
-
-        if need_resize:
-            vis = cv.resize(vis, None, fx=2.0, fy=2.0, interpolation=cv.INTER_NEAREST)
-        cv.imshow(window, vis)
-        cv.waitKey(0)
-
-    @staticmethod
-    def _show_fitted_lines(cleaned: np.ndarray, lines: list, all_pts: list,
-                           corners: list, window: str = "border fit", need_resize: bool = False) -> None:
-        """Show the cleaned DMC with each side's boundary points, the fitted
-        outer-tangent lines, and the resulting quad (upscaled for visibility)."""
-        vis = cv.cvtColor(cleaned, cv.COLOR_GRAY2BGR)
-        colors = [(0, 0, 255), (0, 140, 255), (255, 0, 0), (0, 255, 0)]  # side 0..3
-        diag = float(np.hypot(*cleaned.shape[:2]))
-
-        for (normal, c), pts, col in zip(lines, all_pts, colors):
-            for p in pts:
-                cv.circle(vis, (int(round(p[0])), int(round(p[1]))), 1, col, -1)
-            normal = np.asarray(normal, dtype=float)
-            d = np.array([-normal[1], normal[0]])   # line direction
-            p0 = -c * normal                          # a point on the line (unit normal)
-            pa = (p0 - d * diag).astype(int)
-            pb = (p0 + d * diag).astype(int)
-            print(f"[border-fitter] {pts.shape[0]} points for side with color: {col}")
-            cv.line(vis, tuple(pa), tuple(pb), col, 1)
-
-        quad = np.array([[int(round(p[0])), int(round(p[1]))] for p in corners], dtype=np.int32)
-        cv.polylines(vis, [quad], True, (255, 0, 255), 1)
-        for p in corners:
-            cv.circle(vis, (int(round(p[0])), int(round(p[1]))), 2, (255, 0, 255), -1)
-
-        scale = max(1, int(round(600.0 / max(cleaned.shape[:2]))))
-        if scale > 1:
-            vis = cv.resize(vis, None, fx=scale, fy=scale, interpolation=cv.INTER_NEAREST)
-
-        if need_resize:
-            vis = cv.resize(vis, None, fx=2.0, fy=2.0, interpolation=cv.INTER_NEAREST)
-        cv.imshow(window, vis)
-        cv.waitKey(0)
-
-    def _show_selected_points(self, cleaned: np.ndarray, pts: np.ndarray):
-        pass
-
 
     @staticmethod
     def _scan_boundary_inward(cleaned: np.ndarray, p_start: np.ndarray, p_end: np.ndarray,
@@ -490,7 +420,7 @@ class BorderFitter:
             return None
         x_left, y_top, x_right, y_bottom = bounds
 
-        self._draw_extent_debug(warped, binary, x_left, y_top, x_right, y_bottom)
+        draw_extent_debug(warped, binary, x_left, y_top, x_right, y_bottom)
 
         warped_corners = np.array([
             [x_left, y_bottom],
@@ -538,7 +468,7 @@ class BorderFitter:
                 return None
             fitted_lines.append(line)
 
-        self._draw_scan_debug(edge_img, borders, all_border_pts, fitted_lines)
+        draw_scan_debug(edge_img, borders, all_border_pts, fitted_lines)
 
         vertices_raw = [
             self._intersect_lines(fitted_lines[3], fitted_lines[0]),
@@ -568,22 +498,6 @@ class BorderFitter:
 
         return (int(cols_above[0]), int(rows_above[0]),
                 int(cols_above[-1]), int(rows_above[-1]))
-
-    @staticmethod
-    def _draw_extent_debug(warped: np.ndarray, binary: np.ndarray,
-                           x_left: int, y_top: int, x_right: int, y_bottom: int) -> None:
-        warped_bgr = cv.cvtColor(warped, cv.COLOR_GRAY2BGR)
-        binary_bgr = cv.cvtColor(binary, cv.COLOR_GRAY2BGR)
-
-        for img in (warped_bgr, binary_bgr):
-            cv.line(img, (0, y_top), (img.shape[1] - 1, y_top), (0, 0, 255), 1)
-            cv.line(img, (0, y_bottom), (img.shape[1] - 1, y_bottom), (0, 0, 255), 1)
-            cv.line(img, (x_left, 0), (x_left, img.shape[0] - 1), (0, 255, 0), 1)
-            cv.line(img, (x_right, 0), (x_right, img.shape[0] - 1), (0, 255, 0), 1)
-
-        cv.imshow("border_fitter: warped + extent", warped_bgr)
-        cv.imshow("border_fitter: binary + extent", binary_bgr)
-        cv.waitKey(0)
 
     @staticmethod
     def _scan_border_points(edge_img: np.ndarray, p_start: np.ndarray, p_end: np.ndarray,
@@ -679,53 +593,6 @@ class BorderFitter:
         return np.linalg.solve(A, b)
 
     @staticmethod
-    def _draw_scan_debug(edge_img: np.ndarray, borders: list, all_border_pts: list,
-                         fitted_lines: list) -> None:
-        if len(edge_img.shape) == 2:
-            debug = cv.cvtColor(edge_img, cv.COLOR_GRAY2BGR)
-        else:
-            debug = edge_img.copy()
-
-        colors = [(0, 0, 255), (0, 255, 0), (255, 0, 0), (0, 255, 255)]
-        labels = ["bottom", "right", "top", "left"]
-
-        pts_only = debug.copy()
-        for i, pts in enumerate(all_border_pts):
-            for pt in pts:
-                cv.circle(pts_only, (int(round(pt[0])), int(round(pt[1]))), 1, colors[i], -1)
-
-        with_lines = debug.copy()
-        for i, ((p_start, p_end), (normal, c)) in enumerate(zip(borders, fitted_lines)):
-            d_start = float(np.dot(normal, p_start) + c)
-            d_end = float(np.dot(normal, p_end) + c)
-            proj_start = p_start - d_start * normal
-            proj_end = p_end - d_end * normal
-            cv.line(
-                with_lines,
-                (int(round(proj_start[0])), int(round(proj_start[1]))),
-                (int(round(proj_end[0])), int(round(proj_end[1]))),
-                colors[i], 2
-            )
-
-        legend_h = 20 * len(labels) + 10
-        legend = np.zeros((legend_h, 200, 3), dtype=np.uint8)
-        for i, (color, lbl) in enumerate(zip(colors, labels)):
-            cv.circle(legend, (15, 15 + i * 20), 5, color, -1)
-            cv.putText(legend, lbl, (30, 20 + i * 20), cv.FONT_HERSHEY_SIMPLEX, 0.4, color, 1)
-
-        target_size = 800
-        h, w = pts_only.shape[:2]
-        scale = max(1, int(round(target_size / max(h, w))))
-        if scale > 1:
-            pts_only = cv.resize(pts_only, (w * scale, h * scale), interpolation=cv.INTER_NEAREST)
-            with_lines = cv.resize(with_lines, (w * scale, h * scale), interpolation=cv.INTER_NEAREST)
-
-        cv.imshow("border_fitter: sampled points", pts_only)
-        cv.imshow("border_fitter: ransac lines", with_lines)
-        cv.imshow("border_fitter: legend", legend)
-        cv.waitKey(0)
-
-    @staticmethod
     def _fit_from_l_pattern(l_pattern: LPattern) -> PreciseLocation:
         corner = np.array(l_pattern.corner)
         v1 = np.array(l_pattern.vertex1)
@@ -754,15 +621,3 @@ class BorderFitter:
             angle=0,
             size=(float(np.linalg.norm(dir_h)), float(np.linalg.norm(dir_v)))
         )
-
-    @staticmethod
-    def draw_precise_location(image: np.ndarray,
-                              location: PreciseLocation,
-                              color: Tuple[int, int, int] = (0, 255, 0)) -> np.ndarray:
-        result = image.copy()
-        vertices = location.get_ordered_vertices()
-
-        pts = np.array(vertices, dtype=np.int32).reshape((-1, 1, 2))
-        cv.polylines(result, [pts], True, color, 2)
-
-        return result
