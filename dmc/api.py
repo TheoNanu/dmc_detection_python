@@ -1,7 +1,6 @@
 import numpy as np
 
-from dmc import DebugSink
-from dmc.debug import NullSink
+from dmc.debug import NullSink, DebugSink
 from dmc.config import DetectorConfig, DecoderConfig
 from dmc.data import DetectionResult, Decoded
 from dmc.decoder.decoder import Decoder
