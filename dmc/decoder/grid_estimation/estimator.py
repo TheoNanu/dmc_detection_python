@@ -63,14 +63,14 @@ class GridEstimator:
     # robust to a non-uniform/slightly-cut warp and to low module counts,
     # where autocorrelation gives only a coarse integer pitch.
     # ------------------------------------------------------------------
-    def estimate_grid(self, warp_gray: np.ndarray, off: int = 4
+    def estimate_grid(self, warp_gray: np.ndarray, off: int = 4, inverted: bool = False
                       ) -> Optional[Tuple[np.ndarray, np.ndarray]]:
         """Return (col_centres, row_centres) sampling positions, or None if the
         timing borders are too degraded to locate enough boundaries."""
         h, w = warp_gray.shape[:2]
 
-        col_bounds, raw_col_bounds = self._timing_boundaries(warp_gray, axis="x", off=off)
-        row_bounds, raw_row_bounds = self._timing_boundaries(warp_gray, axis="y", off=off)
+        col_bounds, raw_col_bounds = self._timing_boundaries(warp_gray, axis="x", off=off, inverted=inverted)
+        row_bounds, raw_row_bounds = self._timing_boundaries(warp_gray, axis="y", off=off, inverted=inverted)
         self.debug.log(f"[estimate-grid] col bounds: {col_bounds} raw col bounds: {raw_col_bounds} row bounds: {row_bounds} raw row bounds: {raw_row_bounds}")
         if col_bounds is None or row_bounds is None:
             return None
@@ -78,7 +78,7 @@ class GridEstimator:
         return (self._boundaries_to_centres(col_bounds),
                 self._boundaries_to_centres(row_bounds))
 
-    def _timing_boundaries(self, img: np.ndarray, axis: str, off: int = 4
+    def _timing_boundaries(self, img: np.ndarray, axis: str, off: int = 4, inverted: bool = False
                            ) -> Optional[Tuple[np.ndarray, np.ndarray]]:
         h, w = img.shape[:2]
         if axis == "x":  # top border -> column boundaries, profile along x
@@ -110,7 +110,10 @@ class GridEstimator:
         # right border (rows) ends white->black (-1). A transition of the wrong
         # polarity at either end is a warp artifact (e.g. a sliver of background
         # left below the solid L) and is trimmed.
-        required = +1 if axis == "x" else -1
+        if inverted:
+            required = -1 if axis == "x" else +1
+        else:
+            required = +1 if axis == "x" else -1
         lo, hi = 0, len(cr)
         while hi - lo > 2 and pol[lo] != required:
             lo += 1
@@ -252,8 +255,8 @@ class GridEstimator:
         return np.array(centres)
 
     def sample_matrix(self, img: np.ndarray, col_centres: np.ndarray,
-                      row_centres: np.ndarray, win: int = 4) -> np.ndarray:
-        """Sample a module bit at each (row, col) centre (1 = dark module).
+                      row_centres: np.ndarray, win: int = 4, inverted: bool = False) -> np.ndarray:
+        """Sample a module bit at each (row, col) center (1 = dark module).
         Threshold is Otsu over the per-module medians."""
         n_rows, n_cols = len(row_centres), len(col_centres)
         h, w = img.shape[:2]
@@ -268,7 +271,7 @@ class GridEstimator:
                            cv.THRESH_BINARY + cv.THRESH_OTSU)[0]
         # Otsu's dark class is value <= thr; use <= so a thr of 0 (saturated,
         # heavily bimodal modules) still classifies the 0-valued dark modules.
-        return (meds <= thr).astype(np.uint8)
+        return (meds >= thr).astype(np.uint8) if inverted else (meds <= thr).astype(np.uint8)
 
     @staticmethod
     def _centres_to_boundaries(centres: np.ndarray) -> np.ndarray:

@@ -5,10 +5,7 @@ from tests.cases import CASES
 
 # Images that expose a known, unfixed library limitation. Kept as strict xfail so
 # they stay tracked and the suite alerts (xpass -> failure) if the gap is ever closed.
-KNOWN_UNSUPPORTED = {
-    "synthetic_image5.png": "inverted DMC: light modules on dark background "
-                            "(including the L-finder pattern) is not supported",
-}
+KNOWN_UNSUPPORTED: dict[str, str] = {}
 
 DECODE_CASES = [c for c in CASES if c.expected]
 

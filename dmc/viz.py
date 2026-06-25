@@ -80,19 +80,13 @@ def draw_results(frame: np.ndarray, results: List[DetectionResult],
         x, y, w, h = result.candidate_box
 
         if result.precise_location and result.is_valid:
-            print("DMC DETECTED")
             vertices = result.precise_location.ordered_vertices()
             pts = np.array(vertices, dtype=np.int32)
             cv.polylines(output, [pts], True, (0, 255, 0), 2)
 
             if debug_view:
-                print("DMC DETECTED, DRAWING CANDIDATE")
                 cx, cy = int(result.precise_location.center[0]), int(result.precise_location.center[1])
                 cv.circle(output, (cx, cy), 10, (255, 0, 0), -1)
-
-        elif debug_view:
-            print("DMC NOT DETECTED BUT DRAWING CANDIDATE")
-            # cv.rectangle(output, (x, y), (x + w, y + h), (0, 0, 255), 1)
 
     return output
 
@@ -257,6 +251,25 @@ def draw_sampled_border(edge_img: np.ndarray,
 
     debug.show("sampled borders", vis)
     debug.pause()
+
+def centers_to_boundaries(centres: np.ndarray) -> np.ndarray:
+    """N module centres -> N+1 cell boundaries (midpoints between adjacent
+    centers, with the two outer edges extrapolated)."""
+    c = np.asarray(centres, dtype=float)
+    inner = (c[:-1] + c[1:]) / 2.0
+    first = c[0] - (c[1] - c[0]) / 2.0
+    last = c[-1] + (c[-1] - c[-2]) / 2.0
+    return np.concatenate([[first], inner, [last]])
+
+def draw_module_grid(image: np.ndarray, col_centres: np.ndarray,
+                     row_centres: np.ndarray, color: int = 255) -> None:
+    """Draw the grid lines on the module *boundaries* (not the centres), so
+    each cell holds exactly one module."""
+    h, w = image.shape[:2]
+    for x in centers_to_boundaries(col_centres):
+        cv.line(image, (int(round(x)), 0), (int(round(x)), h), color, 1)
+    for y in centers_to_boundaries(row_centres):
+        cv.line(image, (0, int(round(y))), (w, int(round(y))), color, 1)
 
 def draw_module_numbers(image: np.ndarray, col_centres: np.ndarray,
                         row_centres: np.ndarray, scale: float = 2.0,

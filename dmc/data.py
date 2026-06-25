@@ -84,6 +84,7 @@ class DetectionResult:
     l_patterns: List[LPattern]
     is_valid: bool
     score: float
+    is_inverted: bool
 
     def rectify(self, full_frame: np.ndarray, output_size: int = 400) -> Optional[np.ndarray]:
         if not self.precise_location or not self.l_patterns:

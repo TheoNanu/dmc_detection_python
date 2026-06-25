@@ -9,12 +9,13 @@ from dmc.debug import DebugSink, NullSink
 from dmc.decoder.grid_estimation import GridEstimator
 from dmc.detector import DetectionResult
 from dmc.utils import valid_shape
+from dmc.viz import draw_module_numbers, draw_module_grid
 
 
 class Decoder:
     def __init__(self, config: DecoderConfig = DecoderConfig(), debug: DebugSink = NullSink()):
         self.config = config
-        self.estimator = GridEstimator(margin=self.config.estimator_margin)
+        self.estimator = GridEstimator(margin=self.config.estimator_margin, debug=debug)
         self.debug = debug
 
     def decode(self, image: np.ndarray, detection: DetectionResult) -> Optional[Decoded]:
@@ -29,17 +30,26 @@ class Decoder:
         if warp is None:
             return None
 
+        grid_vis = warp.copy()
+
         gray = cv.medianBlur(cv.cvtColor(warp, cv.COLOR_BGR2GRAY), self.config.smoothing)
 
         self.debug.show("rectified", gray)
+        self.debug.pause()
 
         h, w = gray.shape[:2]
 
-        grid = self.estimator.estimate_grid(gray)
+        grid = self.estimator.estimate_grid(gray, inverted=detection.is_inverted)
 
         if grid is not None:
-            bits = self.estimator.sample_matrix(gray, grid[0], grid[1])
+            col_centres, row_centres = grid
+            bits = self.estimator.sample_matrix(gray, grid[0], grid[1], inverted=detection.is_inverted)
             matrix = bits[1:-1, 1:-1]
+
+            draw_module_grid(grid_vis, col_centres, row_centres)
+            grid_vis = draw_module_numbers(grid_vis, col_centres, row_centres)
+            self.debug.show("final grid", grid_vis)
+            self.debug.pause()
         else:
             pitch, score = self.estimator.estimate_pitch(gray)
 

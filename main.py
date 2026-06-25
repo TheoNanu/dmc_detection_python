@@ -7,7 +7,7 @@ from dmc import viz, DetectorConfig, BorderFitterConfig, CvDebugSink, NullSink
 
 
 def main():
-    filename = "dmc_on_object_test_image.png"
+    filename = "synthetic_image5.png"
     image_path = f"test_images/{filename}"
     frame = cv.imread(image_path)
 
@@ -17,19 +17,22 @@ def main():
 
     start = time.time()
 
-    results = dmc.detect_and_decode(frame, detector_config=DetectorConfig(smoothing=1,
-                                                                          noisy_surface=False,
-                                                                          canny_percentile=90.0,
-                                                                          border_fitter_config=BorderFitterConfig(
-                                                                              gaussian_size=3,
-                                                                              dilate_size=5,
-                                                                              blob_min_area=0,
-                                                                              win_out=20,
-                                                                              win_in=20,
-                                                                              ransac_max_pts_outside=10,
-                                                                              ransac_inlier_threshold=0.9
-                                                                          )),
-                                    debug=NullSink())
+    results = dmc.detect_and_decode(frame,
+                                    detector_config=DetectorConfig(
+                                        smoothing=11,
+                                        noisy_surface=False,
+                                        canny_percentile=90.0,
+                                        border_fitter_config=BorderFitterConfig(
+                                            gaussian_size=3,
+                                            dilate_size=30,
+                                            blob_min_area=50,
+                                            win_in=50,
+                                            win_out=30,
+                                            ransac_max_pts_outside=40,
+                                            ransac_inlier_threshold=0.9
+                                        )
+                                    ),
+                                    debug=CvDebugSink())
 
     print(f"Execution time: {time.time() - start}")
 

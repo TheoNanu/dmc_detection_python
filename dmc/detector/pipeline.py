@@ -73,115 +73,6 @@ class DetectionPipeline:
 
         return self.process_frame(frame, self.detector_config)
 
-    def detect(self, frame: np.ndarray, smoothing: int = 11, noisy_surface=False, canny_percentile: float=90.0,
-               border_fitter_gaussian_size: int = 3, fitter_dilate_size: int = 5, fitter_blob_removal_min_area: int = 0,
-               fitter_win_in: int = 20, fitter_win_out: int = 20, fitter_ransac_max_pts_outside: int = 10,
-               fitter_ransac_inlier_threshold_dist: float = 0.9) -> List[DetectionResult]:
-
-        valid_size = [10, 12, 14, 16, 18, 20, 22, 24, 26, 32, 40, 44, 48, 52, 64, 72, 80, 88, 96, 104, 120, 132, 144]
-        detection_results = []
-
-        if frame is None:
-            print(f"error: could not load image")
-            return []
-
-        return self.process_frame(frame.copy(),
-                                     smoothing=smoothing,
-                                     noisy_surface=noisy_surface,
-                                     canny_percentile=canny_percentile,
-                                     border_fitter_gaussian_size=border_fitter_gaussian_size,
-                                     fitter_dilate_size=fitter_dilate_size,
-                                     fitter_blob_removal_min_area=fitter_blob_removal_min_area,
-                                     fitter_win_in=fitter_win_in,
-                                     fitter_win_out=fitter_win_out,
-                                     fitter_ransac_max_pts_outside=fitter_ransac_max_pts_outside,
-                                     fitter_ransac_inlier_threshold_dist=fitter_ransac_inlier_threshold_dist)
-
-        # output_frame = frame.copy()
-        #
-        # cv.imshow("frame after process", frame)
-        # cv.waitKey(0)
-        #
-        # if results:
-        #     for res in results:
-        #         if res.is_valid:
-        #             warped_bgr = res.get_rectified_image(frame, output_size=400)
-        #
-        #             if warped_bgr is not None:
-        #                 warp_gray = cv.cvtColor(warped_bgr, cv.COLOR_BGR2GRAY)
-        #                 clahe = cv.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
-        #                 # warp_gray = clahe.apply(warp_gray)
-        #
-        #                 cv.imshow("2. rectified image (warped) before smooth", warp_gray)
-        #                 print(f"Warp gray before smoothing: {warp_gray}")
-        #
-        #                 # warp_gray = cv.GaussianBlur(warp_gray,(11, 11), 0)
-        #                 warp_gray = cv.medianBlur(warp_gray, smoothing)
-        #
-        #                 cv.imshow("2. rectified image (warped)", warp_gray)
-        #                 print(f"Warp gray before smoothing: {warp_gray}")
-        #                 # warp_gray = clahe.apply(warp_gray)
-        #
-        #                 print("\ngrid estimator test:\n")
-        #                 estimator = GridEstimator(margin=1)
-        #                 h, w = warp_gray.shape
-        #
-        #                 # Primary: timing-pattern grid (sub-pixel, per-boundary module
-        #                 # positions). Falls back to the autocorrelation pitch when the
-        #                 # timing borders are too degraded to locate enough transitions.
-        #                 grid = estimator.estimate_grid(warp_gray)
-        #
-        #                 data_matrix = None
-        #                 if grid is not None:
-        #                     col_centres, row_centres = grid
-        #                     nx, ny = len(col_centres), len(row_centres)
-        #                     print(f"[timing] estimated matrix size: {nx} cols x {ny} rows")
-        #
-        #                     bits = estimator.sample_matrix(warp_gray, col_centres, row_centres)
-        #                     data_matrix = bits[1:-1, 1:-1]  # strip the 1-module border
-        #
-        #                     grid_vis = warp_gray.copy()
-        #                     estimator.draw_module_grid(grid_vis, col_centres, row_centres)
-        #                     grid_vis = estimator.draw_module_numbers(grid_vis, col_centres, row_centres)
-        #                     cv.imshow("final grid", grid_vis)
-        #                 else:
-        #                     pitch, score = estimator.estimate_pitch(warp_gray)
-        #                     if pitch is not None:
-        #                         print(f"[autocorr] pitch={pitch:.2f} px score={score:.2f}")
-        #                         w_eff = w - 2 * estimator.margin
-        #                         h_eff = h - 2 * estimator.margin
-        #                         nx = int(round(w_eff / pitch))
-        #                         ny = int(round(h_eff / pitch))
-        #                         data_matrix = estimator.get_matrix_data(warp_gray, w / nx, h / ny, ny, nx)
-        #                         print(f"[autocorr] estimated matrix size: {nx} cols x {ny} rows")
-        #                         estimator.draw_grid(warp_gray, h / ny, w / nx)
-        #                         cv.imshow("final grid", warp_gray)
-        #                     else:
-        #                         print("could not estimate grid")
-        #
-        #                 if data_matrix is not None and (
-        #                         data_matrix.shape[0] in valid_size and data_matrix.shape[0] == data_matrix.shape[1]):
-        #                     codewords = estimator.ecc200_codewords_from_data_modules(data_matrix)
-        #                     print(f"codewords: {codewords}")
-        #
-        #                     data_codewords = []
-        #                     for cw in codewords:
-        #                         if cw == 129:  # padding, stop
-        #                             break
-        #                         if 1 <= cw <= 128:
-        #                             data_codewords.append(chr(cw - 1))
-        #                         elif 130 <= cw <= 229:
-        #                             data_codewords.append(f"{cw - 130:02d}")
-        #                         # ignore ECC codewords / mode switches for now
-        #
-        #                     print("".join(data_codewords))
-        #                     print(f"data codewords: {data_codewords}")
-        #
-        #                     detection_results.append(res)
-        #
-        # cv.waitKey(0)
-        # return  detection_results
-
     def process_frame(self, frame: np.ndarray, detector_config: DetectorConfig) -> List[DetectionResult]:
         gray = cv.cvtColor(frame, cv.COLOR_BGR2GRAY)
         candidates = self.extractor.get_candidates(frame)
@@ -239,7 +130,7 @@ class DetectionPipeline:
                 if dashed_result is None:
                     continue
 
-                precise_location = self.border_fitter.fit(region, edges, l_pattern,
+                precise_location, inverted = self.border_fitter.fit(region, edges, l_pattern,
                                                           rough_location=dashed_result,
                                                           gaussian_size=detector_config.border_fitter_config.gaussian_size,
                                                           dilate_size=detector_config.border_fitter_config.dilate_size,
@@ -284,7 +175,8 @@ class DetectionPipeline:
                     precise_location=precise_location,
                     l_patterns=[l_pattern],
                     is_valid=True,
-                    score=validation.score
+                    score=validation.score,
+                    is_inverted=inverted
                 ))
                 region_has_valid = True
 

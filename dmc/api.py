@@ -54,6 +54,7 @@ def detect_and_decode(image: np.ndarray, detector_config: DetectorConfig = Detec
 
     for det in detect(image, detector_config, debug):
         d = decode(image, det, decoder_config, debug)
+        debug.log(f"[decoder] d is {d}, det is {det}")
         if d is not None:
             results.append(d)
 

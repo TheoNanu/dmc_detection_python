@@ -86,11 +86,11 @@ SYNTHETIC_NOISY_NINE = DetectorConfig(
 )
 
 CASES = [
-    Case("dmc_on_object_test_image.png", "", REAL),
-    Case("dmc_sample.jpg", "", REAL),
-    Case("dmc_sample2.jpeg", "", REAL),
-    Case("dmc_test_image.png", "", REAL),
-    Case("img.png", "", REAL),
+    Case("dmc_on_object_test_image.png", "00003686754401016001--1829020134", REAL),
+    Case("dmc_sample.jpg", "Technomark", REAL),
+    Case("dmc_sample2.jpeg", "0009999991000037869801053972573810883302001000240210369623\x1d400G10700324", REAL),
+    Case("dmc_test_image.png", "Data Matrix Code Test Image Number 3", REAL),
+    Case("img.png", "350081004283911975", REAL),
     Case("synthetic_image1.png", "DMC12345", SYNTHETIC_SMOOTH),
     Case("synthetic_image2.png", "DMC12345", SYNTHETIC_NOISY_TWO),
     Case("synthetic_image3.png", "DMC12345", SYNTHETIC_SMOOTH),
